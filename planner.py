@@ -85,8 +85,10 @@ class Planner:
 
         # 8. Battery warning (planner injects replan toward RTH)
         bat = self._safety.check_battery()
-        if bat and not bat.retryable:
-            return PlanDecision.FAILSAFE
+        if bat:
+            if not bat.retryable:
+                return PlanDecision.FAILSAFE
+            return PlanDecision.REPLAN  # BATTERY_LOW → replan toward RTH
 
         # 9. Success with next action → continue
         if response.ok:

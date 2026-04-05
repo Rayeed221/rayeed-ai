@@ -75,6 +75,12 @@ def test_decide_abort_on_non_retryable_failure(planner):
     assert planner.decide(resp) == PlanDecision.ABORT
 
 
+def test_decide_replan_on_battery_low(planner, safety):
+    safety.update_battery(20.0)  # 20% — below BATTERY_LOW_PCT (25%)
+    resp = ToolResponse.success(tool="goto_position", state="enroute", next_action="wait_arrival")
+    assert planner.decide(resp) == PlanDecision.REPLAN
+
+
 # ── Non-blocking wait ──────────────────────────────────────────────────────────
 
 def test_wait_is_active_immediately_after_schedule(planner):

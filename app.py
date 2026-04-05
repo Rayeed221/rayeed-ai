@@ -212,6 +212,11 @@ class DroneAI:
                                     reason=tool_resp.error or f"planner {decision.value}"
                                 )
 
+                            elif decision == PlanDecision.REPLAN:
+                                logger.warning("[PLANNER] Low battery — replanning toward RTH")
+                                from workflows.return_home import run_return_home
+                                asyncio.ensure_future(self.planner.run_workflow(run_return_home))
+
                             # Persist mission state after every tool call
                             self.mission_mem.save_state({
                                 "mission_state": self.sm.state.value,
