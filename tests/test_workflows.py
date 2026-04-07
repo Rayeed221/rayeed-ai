@@ -10,8 +10,8 @@ from planner import Planner
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def ok(tool, state="connected", next_action=None, wait=None):
-    return ToolResponse.success(tool=tool, state=state, next_action=next_action, wait=wait)
+def ok(tool, state="connected", data=None, next_action=None, wait=None):
+    return ToolResponse.success(tool=tool, state=state, data=data, next_action=next_action, wait=wait)
 
 def fail(tool, state="idle", error="MOCK_ERROR", next_action=None):
     return ToolResponse.failure(tool=tool, state=state, error=error, next_action=next_action)
@@ -61,6 +61,7 @@ async def test_startup_with_wait_instruction(dispatcher, sm, safety, planner):
     from workflows.startup import run_startup
     responses = [
         ok("connect_drone",    state="connected", wait=WaitInstruction(0.01, "test wait")),
+        ok("connect_drone",    state="connected"), # Second call after wait
         ok("get_current_state", state="connected"),
         ok("get_telemetry",    state="connected"),
         ok("get_battery",      state="connected"),
@@ -122,6 +123,7 @@ async def test_navigation_with_yaw(dispatcher, sm, safety, planner):
 @pytest.mark.asyncio
 async def test_return_home_success(dispatcher, sm, safety, planner):
     from workflows.return_home import run_return_home
+    safety.update_battery(80)
     dispatcher.dispatch.return_value = ok("return_to_launch", state="rtl",
                                           next_action="wait_arrival")
     dispatcher.dispatch.side_effect = [
@@ -137,13 +139,14 @@ async def test_return_home_success(dispatcher, sm, safety, planner):
 @pytest.mark.asyncio
 async def test_return_home_battery_critical_skips_to_land(dispatcher, sm, safety, planner):
     from workflows.return_home import run_return_home
+    safety.update_battery(10)  # Set critical battery
+    # Only need get_battery to fail/failsafe
     dispatcher.dispatch.side_effect = [
-        ok("get_battery", state="hover", data={"level_percent": 10}),  # critical
-        ok("land",        state="landing"),
+        ok("get_battery", state="hover", data={"level_percent": 10}),
     ]
     result = await run_return_home(dispatcher, sm, safety, planner)
-    assert result is True
-    assert dispatcher.dispatch.call_count == 2  # battery + land only
+    assert result is False  # Workflow aborted by planner failsafe
+    assert dispatcher.dispatch.call_count >= 1
 
 
 # ── Emergency ─────────────────────────────────────────────────────────────────

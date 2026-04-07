@@ -15,18 +15,14 @@ async def run_landing(dispatcher, sm, safety, planner) -> bool:
     logger.info("[LANDING] Initiating landing")
 
     # Step 1: Land command
-    resp = await dispatcher.dispatch("land", {})
-    if not resp.ok:
-        logger.error(f"[LANDING] land failed: {resp.error}")
+    if not await planner.execute_step("land", {}):
         return False
 
     # Step 2: Brief wait for ground contact
     await asyncio.sleep(2.0)
 
     # Step 3: Disarm
-    resp = await dispatcher.dispatch("disarm_drone", {})
-    if not resp.ok:
-        logger.warning(f"[LANDING] disarm failed: {resp.error} — may already be disarmed")
+    await planner.execute_step("disarm_drone", {})
 
     logger.info("[LANDING] ✓ Landed and disarmed")
     return True

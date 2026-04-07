@@ -62,8 +62,11 @@ class Planner:
             if any(k in response.error for k in ("BATTERY_CRITICAL", "TELEMETRY_EMERGENCY")):
                 return PlanDecision.FAILSAFE
 
-        # 3. Non-retryable failure → abort
+        # 3. Non-retryable failure → abort (or failsafe if airborne)
         if not response.ok and response.next_action not in ("retry", "emergency"):
+            if self._sm.is_airborne():
+                logger.warning(f"[PLANNER] Abort requested while airborne → promoting to FAILSAFE. Reason: {response.error}")
+                return PlanDecision.FAILSAFE
             return PlanDecision.ABORT
 
         # 4. Emergency next_action → failsafe
@@ -152,3 +155,37 @@ class Planner:
     def abort(self):
         self._aborted = True
         logger.warning("[PLANNER] Mission aborted by caller.")
+
+    async def execute_step(self, tool_name: str, args: dict) -> bool:
+        """Shared tool execution helper with wait and retry handling. Returns success."""
+        if self._aborted:
+            return False
+
+        resp = await self._dispatcher.dispatch(tool_name, args)
+        decision = self.decide(resp)
+
+        if decision == PlanDecision.WAIT:
+            wait = resp.wait or self._safety.check_telemetry_freshness()
+            if isinstance(wait, WaitInstruction):
+                self.schedule_wait(wait)
+            else:
+                # telemtry stale retryable wait
+                self.schedule_wait(WaitInstruction(seconds=2.0, reason="telemetry recovery"))
+            
+            while self.is_waiting():
+                await asyncio.sleep(0.5)
+            return await self.execute_step(tool_name, args)
+
+        elif decision == PlanDecision.RETRY:
+            logger.warning(f"[PLANNER] Retrying {tool_name}")
+            return await self.execute_step(tool_name, args)
+
+        elif decision == PlanDecision.FAILSAFE:
+            await self.trigger_failsafe(reason=resp.error or f"{tool_name} failed")
+            return False
+
+        elif decision == PlanDecision.ABORT:
+            self.abort()
+            return False
+
+        return resp.ok

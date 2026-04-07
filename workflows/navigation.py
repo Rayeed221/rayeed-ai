@@ -23,41 +23,20 @@ async def run_navigation(
 ) -> bool:
     logger.info(f"[NAV] Navigating to ({lat:.6f}, {lon:.6f}, {alt}m) @ {speed_ms} m/s")
 
-    # Step 1: Set speed (non-critical — warn and continue on failure)
-    resp = await dispatcher.dispatch("set_speed", {"speed_ms": speed_ms})
-    if not resp.ok:
-        logger.warning(f"[NAV] set_speed failed: {resp.error} — continuing anyway")
+    # Step 1: Set speed
+    await planner.execute_step("set_speed", {"speed_ms": speed_ms})
 
     # Step 2: Set yaw (optional)
     if yaw_deg is not None:
-        resp = await dispatcher.dispatch("set_yaw", {"yaw_deg": yaw_deg})
-        if resp.wait:
-            planner.schedule_wait(resp.wait)
-            while planner.is_waiting():
-                await asyncio.sleep(0.2)
+        await planner.execute_step("set_yaw", {"yaw_deg": yaw_deg})
 
     # Step 3: Goto position
-    resp = await dispatcher.dispatch("goto_position", {"lat": lat, "lon": lon, "alt": alt})
-    decision = planner.decide(resp)
-    if decision in (PlanDecision.FAILSAFE, PlanDecision.ABORT):
-        await planner.trigger_failsafe(reason=resp.error or "goto_position failed")
+    if not await planner.execute_step("goto_position", {"lat": lat, "lon": lon, "alt": alt}):
         return False
-    if resp.wait:
-        planner.schedule_wait(resp.wait)
-        while planner.is_waiting():
-            await asyncio.sleep(0.2)
 
-    # Step 4: Wait arrival — re-check position if needed
-    resp = await dispatcher.dispatch("wait_arrival", {})
-    if not resp.ok:
-        logger.warning("[NAV] wait_arrival uncertain — re-reading position")
-        pos = await dispatcher.dispatch("get_position_str", {})
-        logger.info(f"[NAV] Current position: {pos.data}")
-        # Re-attempt arrival check once
-        resp = await dispatcher.dispatch("wait_arrival", {})
-        if not resp.ok:
-            logger.error("[NAV] Arrival confirmation failed")
-            return False
+    # Step 4: Wait arrival
+    if not await planner.execute_step("wait_arrival", {}):
+        return False
 
     logger.info("[NAV] ✓ Arrived at target")
     return True

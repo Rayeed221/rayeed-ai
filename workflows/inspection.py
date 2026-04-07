@@ -20,24 +20,17 @@ async def run_inspection(
     logger.info(f"[INSPECTION] Holding {hold_seconds}s for data capture")
 
     # Step 1: Hold position
-    resp = await dispatcher.dispatch("wait_time", {"seconds": hold_seconds})
-    if resp.wait:
-        planner.schedule_wait(resp.wait)
-        while planner.is_waiting():
-            await asyncio.sleep(0.2)
+    await planner.execute_step("wait_time", {"seconds": hold_seconds})
 
     # Step 2: Orient (optional)
     if yaw_deg is not None:
-        resp = await dispatcher.dispatch("set_yaw", {"yaw_deg": yaw_deg})
-        logger.info(f"[INSPECTION] Yaw set → {resp.data}")
+        await planner.execute_step("set_yaw", {"yaw_deg": yaw_deg})
 
     # Step 3: Read position
-    pos_resp = await dispatcher.dispatch("get_position_str", {})
-    logger.info(f"[INSPECTION] Position: {pos_resp.data.get('position')}")
+    await planner.execute_step("get_position_str", {})
 
     # Step 4: Read telemetry
-    tel_resp = await dispatcher.dispatch("get_telemetry", {})
-    logger.info(f"[INSPECTION] Telemetry: {tel_resp.data}")
+    await planner.execute_step("get_telemetry", {})
 
     logger.info("[INSPECTION] ✓ Complete")
     return True

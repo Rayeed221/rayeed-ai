@@ -25,21 +25,9 @@ async def run_startup(dispatcher, sm, safety, planner, connection_string="udp:12
     logger.info("[STARTUP] Initiating startup workflow")
 
     for tool_name, arg_fn in _STEPS:
-        # Honour any active wait before the next step
-        while planner.is_waiting():
-            await asyncio.sleep(0.2)
-
-        resp = await dispatcher.dispatch(tool_name, arg_fn(connection_string))
-        logger.info(f"[STARTUP] {tool_name} → ok={resp.ok} state={resp.state}")
-
-        if not resp.ok:
-            logger.error(f"[STARTUP] Failed at '{tool_name}': {resp.error}")
+        if not await planner.execute_step(tool_name, arg_fn(connection_string)):
+            logger.error(f"[STARTUP] Aborted at '{tool_name}'")
             return False
-
-        if resp.wait:
-            planner.schedule_wait(resp.wait)
-            while planner.is_waiting():
-                await asyncio.sleep(0.2)
 
     logger.info("[STARTUP] ✓ Complete")
     return True

@@ -13,7 +13,7 @@ CHANNELS            = 1
 # ─── Backend ────────────────────────────────────────────────────────────────
 # Options: "sim" | "mavlink"
 # BACKEND     = os.environ.get("DRONE_BACKEND", "sim")
-BACKEND     = os.environ.get("DRONE_BACKEND", "mavlink")
+BACKEND     = os.environ.get("DRONE_BACKEND", "sim")
 
 MAVLINK_URI = os.environ.get("MAVLINK_URI", "tcp:127.0.0.1:5762")
 
