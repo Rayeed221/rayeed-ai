@@ -1,4 +1,4 @@
-google-genai==0.8.0
+google-genai
 pyaudio
 pytest
-pytest-asyncio==0.23.8
+pytest-asyncio
