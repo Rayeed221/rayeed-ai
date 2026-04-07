@@ -3,6 +3,7 @@ Dispatcher flow (Decision 4 — Planner has override authority):
 
   incoming tool call
   → validate against registry
+  → vision bypass (vision tools skip safety + adapter entirely)
   → safety pre-check (battery / telemetry / altitude / speed / legality / retries)
   → execute via backend adapter (with timeout)
   → normalize to ToolResponse schema
@@ -13,6 +14,7 @@ Dispatcher flow (Decision 4 — Planner has override authority):
 
 import asyncio
 import logging
+from typing import Optional
 
 from schemas import ToolResponse, WaitInstruction
 from state_machine import StateMachine, MissionState, IllegalTransitionError
@@ -20,6 +22,14 @@ from safety_policy import SafetyPolicy
 from tool_registry import TOOL_REGISTRY
 
 logger = logging.getLogger(__name__)
+
+# Vision tools bypass safety checks and the drone adapter entirely.
+# They are routed directly to VisionTool.execute() via asyncio.to_thread().
+_VISION_TOOLS = {
+    "vision_obstacle_check",
+    "vision_depth_snapshot",
+    "vision_detect_objects",
+}
 
 # ── State transitions triggered by specific tools ─────────────────────────────
 TOOL_STATE_TRANSITIONS = {
@@ -58,10 +68,17 @@ TOOL_TIMEOUT_SEC = 10.0
 
 
 class ToolDispatcher:
-    def __init__(self, state_machine: StateMachine, safety_policy: SafetyPolicy, adapter):
+    def __init__(
+        self,
+        state_machine: StateMachine,
+        safety_policy: SafetyPolicy,
+        adapter,
+        vision_tool: Optional[object] = None,
+    ):
         self._sm      = state_machine
         self._safety  = safety_policy
         self._adapter = adapter
+        self._vision  = vision_tool
 
     async def dispatch(self, tool_name: str, args: dict) -> ToolResponse:
         current_state = self._sm.state
@@ -73,6 +90,10 @@ class ToolDispatcher:
                 error=f"Tool '{tool_name}' not in registry",
                 next_action="get_current_state",
             )
+
+        # ── 1b. Vision bypass (no safety gate, no adapter, no state change) ────
+        if tool_name in _VISION_TOOLS:
+            return await self._dispatch_vision(tool_name, args)
 
         # ── 2. Safety pre-check (planner authority: block before execution) ───
         err = self._safety.pre_execute_check(tool_name, args)
@@ -144,5 +165,43 @@ class ToolDispatcher:
             data=result,
             next_action=TOOL_NEXT_ACTION.get(tool_name),
             wait=TOOL_WAIT_HINTS.get(tool_name),
+            confidence=1.0,
+        )
+
+    # ── Vision dispatch (bypasses safety + adapter) ───────────────────────────
+
+    async def _dispatch_vision(self, tool_name: str, args: dict) -> ToolResponse:
+        """Route a vision tool call to VisionTool, wrapped in asyncio.to_thread."""
+        if self._vision is None:
+            return ToolResponse.failure(
+                tool=tool_name,
+                state=self._sm.state.value,
+                error="Vision system not initialized (OAK-D not connected or VISION_ENABLED=0)",
+            )
+
+        try:
+            result = await asyncio.to_thread(self._vision.execute, tool_name, args)
+        except Exception as exc:
+            logger.exception(f"[DISPATCH] Vision exception in '{tool_name}': {exc}")
+            return ToolResponse.failure(
+                tool=tool_name,
+                state=self._sm.state.value,
+                error=str(exc),
+                next_action="retry",
+            )
+
+        if "error" in result:
+            logger.warning(f"[DISPATCH] Vision error [{tool_name}]: {result['error']}")
+            return ToolResponse.failure(
+                tool=tool_name,
+                state=self._sm.state.value,
+                error=result["error"],
+            )
+
+        logger.info(f"[DISPATCH] ✓ {tool_name} (vision) → state={self._sm.state.value}")
+        return ToolResponse.success(
+            tool=tool_name,
+            state=self._sm.state.value,
+            data=result,
             confidence=1.0,
         )

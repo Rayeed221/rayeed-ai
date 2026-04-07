@@ -137,4 +137,35 @@ TOOL_REGISTRY: dict = {
         "permission_level": "read",
         "allowed_states": None,
     },
+
+    # ── Vision (OAK-D Lite) ───────────────────────────────────────────────────
+    "vision_obstacle_check": {
+        "description": (
+            "Scan 5 horizontal sectors with OAK-D Lite stereo depth. "
+            "Returns distance per sector and nearest obstacle. No NN required."
+        ),
+        "args_schema": {},
+        "permission_level": "read",
+        "allowed_states": None,
+    },
+    "vision_depth_snapshot": {
+        "description": (
+            "Capture a stereo depth frame and return a 3×3 grid of per-cell "
+            "statistics plus a landing zone flatness assessment."
+        ),
+        "args_schema": {},
+        "permission_level": "read",
+        "allowed_states": None,
+    },
+    "vision_detect_objects": {
+        "description": (
+            "Run on-device YOLO on the OAK-D Lite VPU and return detected "
+            "objects with 3D spatial coordinates (x, y, z in mm)."
+        ),
+        "args_schema": {
+            "min_confidence": {"type": "number", "required": False},
+        },
+        "permission_level": "read",
+        "allowed_states": None,
+    },
 }

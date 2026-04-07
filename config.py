@@ -36,3 +36,13 @@ MEMORY_DIR  = "memory_store"
 VOICE_NAME              = "Sadachbia"
 CONTEXT_TRIGGER_TOKENS  = 104857
 CONTEXT_TARGET_TOKENS   = 52428
+
+# ─── Vision (OAK-D Lite / DepthAI v3) ───────────────────────────────────────
+# Set VISION_ENABLED=0 to disable all vision tools (e.g. headless CI runs)
+VISION_ENABLED      = os.environ.get("VISION_ENABLED", "1") == "1"
+VISION_FPS          = int(os.environ.get("VISION_FPS", "15"))
+VISION_DEPTH_MIN_MM = int(os.environ.get("VISION_DEPTH_MIN_MM", "200"))   # 20 cm
+VISION_DEPTH_MAX_MM = int(os.environ.get("VISION_DEPTH_MAX_MM", "8000"))  # 8 m
+# YOLO blob from Luxonis model zoo (auto-downloaded by blobconverter)
+VISION_BLOB_NAME    = os.environ.get("VISION_BLOB_NAME", "yolov6n_coco_416x416")
+VISION_BLOB_SHAVES  = int(os.environ.get("VISION_BLOB_SHAVES", "6"))
