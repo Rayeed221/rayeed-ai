@@ -206,7 +206,7 @@ def tool_no_camera():
 
 def test_obstacle_check_returns_expected_keys(tool_uniform):
     result = tool_uniform.execute("vision_obstacle_check", {})
-    assert "sectors_m" in result
+    assert "sectors" in result           # renamed from sectors_m (now holds enriched dicts)
     assert "nearest_sector" in result
     assert "nearest_distance_m" in result
     assert "clear" in result

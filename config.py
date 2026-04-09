@@ -46,3 +46,13 @@ VISION_DEPTH_MAX_MM = int(os.environ.get("VISION_DEPTH_MAX_MM", "8000"))  # 8 m
 # YOLO blob from Luxonis model zoo (auto-downloaded by blobconverter)
 VISION_BLOB_NAME    = os.environ.get("VISION_BLOB_NAME", "yolov6n_coco_416x416")
 VISION_BLOB_SHAVES  = int(os.environ.get("VISION_BLOB_SHAVES", "6"))
+
+# Camera mounting relative to drone body (FRD axes).
+# Adjust these when the OAK-D Lite is not mounted level and forward-facing.
+VISION_CAMERA_PITCH_DEG  = float(os.environ.get("VISION_CAMERA_PITCH_DEG",  "0.0"))
+VISION_CAMERA_YAW_DEG    = float(os.environ.get("VISION_CAMERA_YAW_DEG",    "0.0"))
+VISION_CAMERA_OFFSET_F_M = float(os.environ.get("VISION_CAMERA_OFFSET_F_M", "0.0"))
+VISION_CAMERA_OFFSET_R_M = float(os.environ.get("VISION_CAMERA_OFFSET_R_M", "0.0"))
+VISION_CAMERA_OFFSET_D_M = float(os.environ.get("VISION_CAMERA_OFFSET_D_M", "0.0"))
+# OAK-D Lite RGB camera horizontal field of view (degrees)
+VISION_CAMERA_HFOV_DEG   = float(os.environ.get("VISION_CAMERA_HFOV_DEG",   "73.0"))

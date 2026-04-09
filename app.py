@@ -31,6 +31,7 @@ from config import (
     BACKEND, MAVLINK_URI,
     VISION_ENABLED, VISION_FPS, VISION_DEPTH_MIN_MM, VISION_DEPTH_MAX_MM,
     VISION_BLOB_NAME, VISION_BLOB_SHAVES,
+    VISION_CAMERA_PITCH_DEG, VISION_CAMERA_YAW_DEG, VISION_CAMERA_HFOV_DEG,
 )
 from schemas import ToolResponse
 from state_machine import StateMachine
@@ -66,15 +67,18 @@ def build_adapter():
     return SimAdapter()
 
 
-# ── Vision factory ─────────────────────────────────────────────────────────────
+# ── Vision + Localization factory ─────────────────────────────────────────────
 
-def build_vision_tool():
+def build_vision(localizer=None):
     """
     Attempt to build an OakPipeline + VisionTool for the OAK-D Lite.
 
     Failures are non-fatal: if the camera is absent or depthai is not
     installed, vision tools will return errors at call-time rather than
     crashing the whole app.
+
+    Args:
+        localizer: Optional Localizer instance to inject into VisionTool.
 
     Returns (OakPipeline | None, VisionTool | None).
     """
@@ -112,7 +116,8 @@ def build_vision_tool():
             depth_max_mm=VISION_DEPTH_MAX_MM,
         )
         pipeline.start()
-        return pipeline, VisionTool(pipeline)
+        vision_tool = VisionTool(pipeline, localizer=localizer)
+        return pipeline, vision_tool
     except Exception as exc:
         logger.warning(f"[VISION] OAK-D init failed ({exc}) — vision tools disabled")
         return None, None
@@ -167,8 +172,20 @@ class DroneAI:
         # ── Layer 5: Backend ────────────────────────────────────────────────
         self.adapter        = build_adapter()
 
+        # ── Localization: PoseCache + Localizer ─────────────────────────────
+        # Built before Vision so the Localizer can be injected into VisionTool.
+        from localization.pose_cache import PoseCache
+        from localization.localizer import Localizer
+        self.pose_cache     = PoseCache()
+        self.localizer      = Localizer(
+            self.pose_cache,
+            camera_pitch_deg=VISION_CAMERA_PITCH_DEG,
+            camera_yaw_deg=VISION_CAMERA_YAW_DEG,
+            hfov_deg=VISION_CAMERA_HFOV_DEG,
+        )
+
         # ── Layer 0: Vision (OAK-D Lite) — non-fatal if camera absent ───────
-        self.oak_pipeline, _vision_tool = build_vision_tool()
+        self.oak_pipeline, _vision_tool = build_vision(localizer=self.localizer)
 
         # ── Layer 4: Safe execution ─────────────────────────────────────────
         self.sm             = StateMachine()
@@ -183,10 +200,10 @@ class DroneAI:
         self.mic_capture    = MicCapture(self.pya, self.mic_queue)
         self.playback       = Playback(self.pya, self.audio_in_queue)
 
-        # ── Telemetry (background tasks) ────────────────────────────────────
-        self.tel_reader     = TelemetryReader(self.dispatcher, self.safety)
+        # ── Telemetry (background tasks) — pose_cache injected for localization
+        self.tel_reader     = TelemetryReader(self.dispatcher, self.safety, self.pose_cache)
         self.bat_monitor    = BatteryMonitor(self.dispatcher, self.safety, self.planner)
-        self.pos_monitor    = PositionMonitor(self.dispatcher)
+        self.pos_monitor    = PositionMonitor(self.dispatcher, self.pose_cache)
 
         # ── Memory (persistent state) ────────────────────────────────────────
         self.mission_mem    = MissionMemory()
