@@ -52,3 +52,9 @@ typing-inspection==0.4.2
 typing_extensions==4.15.0
 urllib3==2.6.3
 websockets==14.2
+torch>=2.0.0
+torchvision>=0.15.0
+onnxruntime>=1.16.0
+depthai>=2.24.0
+blobconverter>=1.4.0
+scipy>=1.10.0

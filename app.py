@@ -29,6 +29,7 @@ from config import (
     GEMINI_API_KEY, MODEL, VOICE_NAME,
     CONTEXT_TRIGGER_TOKENS, CONTEXT_TARGET_TOKENS,
     BACKEND, MAVLINK_URI,
+    AVOIDANCE_ENABLED, ENCODER_BLOB_PATH, GRU_ONNX_PATH,
 )
 from schemas import ToolResponse
 from state_machine import StateMachine
@@ -134,6 +135,48 @@ class DroneAI:
         # ── Memory (persistent state) ────────────────────────────────────────
         self.mission_mem    = MissionMemory()
         self.env_mem        = EnvironmentMemory()
+
+        # ── Layer 5b: Avoidance system (MAVLink + AVOIDANCE_ENABLED only) ───
+        self.avoidance_ctrl = None
+        if BACKEND == "mavlink" and AVOIDANCE_ENABLED:
+            try:
+                import onnxruntime as ort
+                import depthai as dai
+                from avoidance.pipeline import build_avoidance_pipeline
+                from avoidance_controller import AvoidanceController
+
+                gru_session = ort.InferenceSession(
+                    GRU_ONNX_PATH,
+                    providers=["CPUExecutionProvider"],
+                )
+                pipeline, _, _ = build_avoidance_pipeline(ENCODER_BLOB_PATH)
+                oak_device = dai.Device(pipeline)
+
+                self.avoidance_ctrl = AvoidanceController(
+                    master        = self.adapter._conn,
+                    safety_policy = self.safety,
+                    gru_session   = gru_session,
+                    oak_device    = oak_device,
+                )
+                self.dispatcher.set_avoidance_controller(self.avoidance_ctrl)
+                logger.info("[APP] AvoidanceController configured")
+            except Exception as exc:
+                logger.warning(
+                    f"[APP] Avoidance init skipped ({type(exc).__name__}: {exc}) — "
+                    "running without obstacle avoidance"
+                )
+
+    # ── Avoidance startup (waits for MAVLink connection) ──────────────────────
+
+    async def _start_avoidance(self):
+        """Wait for adapter connection then start AvoidanceController."""
+        while not self.adapter.is_connected():
+            await asyncio.sleep(0.5)
+        try:
+            await self.avoidance_ctrl.start()
+        except Exception as exc:
+            logger.error(f"[APP] Avoidance start failed: {exc} — continuing without avoidance")
+            self.dispatcher.set_avoidance_controller(None)
 
     # ── Send mic PCM to Gemini ─────────────────────────────────────────────────
 
@@ -303,6 +346,8 @@ class DroneAI:
                     tg.create_task(self.send_audio(),                        name="send_audio")
                     tg.create_task(self.receive_responses(),                  name="receive_responses")
                     tg.create_task(self.playback.run(self.turn_manager),     name="playback")
+                    if self.avoidance_ctrl is not None:
+                        tg.create_task(self._start_avoidance(), name="avoidance_startup")
 
         except asyncio.CancelledError:
             logger.info("[SESSION] Shutting down...")

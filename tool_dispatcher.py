@@ -59,9 +59,15 @@ TOOL_TIMEOUT_SEC = 10.0
 
 class ToolDispatcher:
     def __init__(self, state_machine: StateMachine, safety_policy: SafetyPolicy, adapter):
-        self._sm      = state_machine
-        self._safety  = safety_policy
-        self._adapter = adapter
+        self._sm                   = state_machine
+        self._safety               = safety_policy
+        self._adapter              = adapter
+        self._avoidance_controller = None  # set via set_avoidance_controller()
+
+    def set_avoidance_controller(self, controller) -> None:
+        """Register an AvoidanceController to intercept goto_position calls."""
+        self._avoidance_controller = controller
+        logger.info("[DISPATCH] AvoidanceController registered")
 
     async def dispatch(self, tool_name: str, args: dict) -> ToolResponse:
         current_state = self._sm.state
@@ -84,6 +90,45 @@ class ToolDispatcher:
                 error=err.message,
                 next_action="emergency" if err.code in emergency_triggers else "retry" if err.retryable else None,
                 confidence=0.0,
+            )
+
+        # ── 2b. Avoidance intercept for goto_position ─────────────────────────
+        if tool_name == "goto_position" and self._avoidance_controller is not None:
+            try:
+                await self._avoidance_controller.set_goal(
+                    args["lat"], args["lon"], args["alt"]
+                )
+                reached = await self._avoidance_controller.wait_for_arrival(timeout=120.0)
+            except Exception as exc:
+                logger.exception(f"[DISPATCH] AvoidanceController error: {exc}")
+                self._safety.increment_retry(tool_name)
+                return ToolResponse.failure(
+                    tool=tool_name, state=current_state.value,
+                    error=f"avoidance error: {exc}",
+                    next_action="retry",
+                )
+
+            # State transition
+            new_state = TOOL_STATE_TRANSITIONS.get(tool_name)
+            if new_state:
+                try:
+                    self._sm.transition(new_state)
+                except IllegalTransitionError as exc:
+                    logger.warning(f"[DISPATCH] State transition skipped: {exc}")
+
+            self._safety.reset_retry(tool_name)
+            logger.info(f"[DISPATCH] ✓ goto_position (avoidance) → state={self._sm.state.value}")
+
+            return ToolResponse.success(
+                tool=tool_name,
+                state=self._sm.state.value,
+                data={
+                    "status": "reached" if reached else "timeout",
+                    "avoidance": True,
+                },
+                next_action=TOOL_NEXT_ACTION.get(tool_name),
+                wait=TOOL_WAIT_HINTS.get(tool_name),
+                confidence=1.0 if reached else 0.5,
             )
 
         # ── 3. Execute via adapter with timeout ───────────────────────────────

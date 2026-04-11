@@ -38,3 +38,13 @@ MEMORY_DIR  = "memory_store"
 VOICE_NAME              = "Sadachbia"
 CONTEXT_TRIGGER_TOKENS  = 104857
 CONTEXT_TARGET_TOKENS   = 52428
+
+# ─── Avoidance System ────────────────────────────────────────────────────────
+AVOIDANCE_ENABLED             = os.environ.get("AVOIDANCE_ENABLED", "true").lower() == "true"
+AVOIDANCE_HZ                  = int(os.environ.get("AVOIDANCE_HZ", "10"))
+AVOIDANCE_MAX_LATERAL_M       = float(os.environ.get("AVOIDANCE_MAX_LATERAL_M", "3.0"))
+AVOIDANCE_MAX_VERTICAL_M      = float(os.environ.get("AVOIDANCE_MAX_VERTICAL_M", "1.0"))
+AVOIDANCE_SUB_GOAL_SPACING_M  = float(os.environ.get("AVOIDANCE_SUB_GOAL_SPACING_M", "2.0"))
+AVOIDANCE_ARRIVAL_THRESHOLD_M = float(os.environ.get("AVOIDANCE_ARRIVAL_THRESHOLD_M", "0.8"))
+GRU_ONNX_PATH                 = os.environ.get("GRU_ONNX_PATH", "models/gru_avoidance.onnx")
+ENCODER_BLOB_PATH             = os.environ.get("ENCODER_BLOB_PATH", "models/encoder.blob")
