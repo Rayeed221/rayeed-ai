@@ -15,17 +15,17 @@ pip install -r requirements.txt
 # Run with simulated drone (default)
 python app.py
 
-# Run with real drone via MAVLink
+# Run with real drone via MAVLink (default URI: tcp:127.0.0.1:5762)
 DRONE_BACKEND=mavlink MAVLINK_URI=udp:192.168.1.10:14550 python app.py
 
 # Run all tests
 pytest
 
 # Run a single test file
-pytest tests/test_state_machine.py -v
+pytest tests/test_workflows.py -v
 
-# Run tests with async support
-pytest tests/test_failures.py -v
+# Run one specific test
+pytest tests/test_failures.py::test_decide_failsafe_on_battery_critical_error -v
 ```
 
 ## Architecture
@@ -46,7 +46,12 @@ Voice Input → Gemini Live API → Planner → Tool Dispatcher → Drone Adapte
 
 4. **Safe Execution** (`tool_dispatcher.py` + `safety_policy.py` + `state_machine.py`) — 7-step pipeline: registry check → safety pre-check → execute (10s timeout) → state transition → update monitors → reset retry counter → return `ToolResponse`. Safety gates block operations on low battery, stale telemetry, altitude/speed violations, or exceeded retry counts.
 
-5. **Drone Backend** (`adapters/`) — Swappable via `DRONE_BACKEND` env var. `SimAdapter` (default) simulates all operations in memory. `MAVLinkAdapter` connects to real hardware.
+5. **Drone Backend** (`adapters/`) — Swappable via `DRONE_BACKEND` env var. `SimAdapter` (default) simulates all operations in memory. `MAVLinkAdapter` connects to real hardware via `pymavlink`.
+
+### Background subsystems
+
+- `telemetry/` — `TelemetryReader`, `BatteryMonitor`, `PositionMonitor` run as independent asyncio tasks. A crash in any of them is isolated from the session tasks (see `DroneAI.run()` in `app.py` for the two-group task split).
+- `memory/` — `MissionMemory` persists the last tool + mission state to `memory_store/mission_state.json` after every tool call; `EnvironmentMemory` stores named waypoints / obstacles / no-fly zones in `memory_store/environment.json`.
 
 ### Key Files
 
@@ -56,8 +61,8 @@ Voice Input → Gemini Live API → Planner → Tool Dispatcher → Drone Adapte
 | `state_machine.py` | Mission states (IDLE→CONNECTED→ARMED→TAKEOFF→ENROUTE→HOVER→LANDING→RTL→FAILSAFE) and legal transition graph |
 | `tool_dispatcher.py` | Central 7-step execution pipeline for all drone commands |
 | `safety_policy.py` | Pre-execution gates: battery, telemetry freshness, altitude ceiling, speed, retry limits |
-| `planner.py` | Decision engine; overrides LLM `next_action`; schedules non-blocking waits |
-| `tool_registry.py` | Metadata for 25+ tools: description, arg schema, permission level, allowed states |
+| `planner.py` | Decision engine; overrides LLM `next_action`; `execute_step()` helper drives workflows |
+| `tool_registry.py` | Metadata for 18 tools: description, arg schema, permission level, allowed states |
 | `schemas.py` | `ToolResponse` envelope (ok, tool, state, data, error, next_action, wait, confidence, timestamp) |
 | `config.py` | All thresholds and env vars (API key, audio rates, backend, safety limits) |
 
@@ -66,96 +71,54 @@ Voice Input → Gemini Live API → Planner → Tool Dispatcher → Drone Adapte
 Every drone command goes through `tool_dispatcher.py`:
 1. Registry check (tool exists?)
 2. Safety pre-check (battery ≥15%, telemetry fresh <5s, altitude <120m, speed <15 m/s, retries <3)
-3. Execute via adapter (10s timeout)
+3. Execute via adapter (10s timeout, wrapped in `asyncio.to_thread` so adapters can be synchronous)
 4. State machine transition
-5. Update safety monitors
+5. Update safety monitors (`update_telemetry_timestamp`, `update_battery`, `update_altitude` are triggered by specific tool names — see `tool_dispatcher.py:128-133`)
 6. Reset retry counter on success
 7. Return normalized `ToolResponse`
 
 ### State Machine Rules
 
 - `force_failsafe()` is always allowed from any state
-- Tools declare which states they are valid in (e.g., `takeoff` only in `ARMED`)
-- `is_airborne()` covers TAKEOFF, ENROUTE, HOVER, LANDING, RTL
+- Tools declare which states they are valid in via `allowed_states` in `tool_registry.py` (e.g., `takeoff` only in `ARMED`); `None` means any state
+- `is_airborne()` covers TAKEOFF, ENROUTE, HOVER, RTL (note: LANDING is **not** airborne — see `state_machine.py:67-71`)
+
+### Workflows (`workflows/`)
+
+Code-driven flight sequences (`startup`, `takeoff`, `navigation`, `inspection`, `landing`, `return_home`, `emergency`). Each exports an `async def run_<name>(dispatcher, sm, safety, planner, ...)` coroutine.
+
+**Primitive**: every non-emergency workflow step goes through `planner.execute_step(tool_name, args)`, which centralizes dispatch + wait + retry + failsafe + abort handling. A typical step is a single line:
+
+```python
+if not await planner.execute_step("arm_drone", {}):
+    return False
+```
+
+The `emergency` workflow is the exception — it calls `dispatcher.dispatch()` directly (wrapped in `_try()` with a short timeout) so it never blocks or raises, even when the link is dead.
 
 ### Backend Abstraction
 
 Both adapters implement the same interface from `adapters/base_adapter.py`. Switching between sim and MAVLink requires only an env var change — no code changes.
 
-## MAVLink Adapter Implementation
+Adapter handlers (`_handle_<tool_name>`) are **synchronous** — the dispatcher wraps `adapter.execute()` in `asyncio.to_thread()`, so blocking pymavlink calls (`wait_heartbeat`, `recv_match`, `time.sleep`) are safe inside handlers.
 
-The stub lives at `adapters/mavlink_adapter.py`. All 18 `_handle_*()` methods exist but return `{"error": "MAVLink not yet wired..."}`. The `SimAdapter` at `adapters/sim_adapter.py` is the reference implementation — match its structure exactly.
+### MAVLink adapter return-shape contract
 
-### Dependency
-`pymavlink` is **not in `requirements.txt`** — add it before implementing:
-```bash
-pip install pymavlink
-# then add "pymavlink" to requirements.txt
-```
+`safety_policy.py`, `planner.py`, and `tool_dispatcher.py` read specific fields from adapter return dicts — field names must match exactly. The contract is visible in `adapters/sim_adapter.py` (reference) and mirrored in `adapters/mavlink_adapter.py`.
 
-### Execution Model
-All handler methods must remain **synchronous**. The dispatcher wraps every `adapter.execute()` call with `asyncio.to_thread()`, so blocking pymavlink calls (e.g., `wait_heartbeat()`, `recv_match()`) are safe inside handlers.
+**Critical**: `safety_policy.update_battery()` is fed from `get_battery` results where the dispatcher reads the key `level_percent` (not `percent` or `battery_pct`). See `tool_dispatcher.py:131`.
 
-### Connection Pattern
-```python
-from pymavlink import mavutil
-self._conn = mavutil.mavlink_connection(self._connection_string)
-self._conn.wait_heartbeat()
-```
-
-### Required Handler Return Shapes
-The dispatcher, planner, and safety policy read specific fields from these dicts — field names must match exactly:
-
-| Handler | Must Return |
-|---|---|
-| `_handle_connect_drone` | `{"status": "connected", "connection_string": str}` |
-| `_handle_get_telemetry` | `{"altitude": float, "airspeed": float, "groundspeed": float, "heading": float}` |
-| `_handle_get_position_str` | `{"position": "Lat: X, Lon: X, Alt: X"}` |
-| `_handle_get_battery` | `{"voltage": float, "current": float, "level_percent": float}` |
-| `_handle_get_current_state` | `{"mode": str, "armed": bool, "system_status": str}` |
-| `_handle_get_distance_to_str` | `{"distance_str": str, "bearing": float}` |
-| `_handle_set_mode` | `{"status": "ok", "mode": str}` |
-| `_handle_arm_drone` | `{"status": "armed"}` |
-| `_handle_disarm_drone` | `{"status": "disarmed"}` |
-| `_handle_takeoff` | `{"status": "taking_off", "target_altitude": float}` |
-| `_handle_land` | `{"status": "landing"}` |
-| `_handle_return_to_launch` | `{"status": "returning_to_launch"}` |
-| `_handle_goto_position` | `{"status": "moving", "target": {"lat": float, "lon": float, "alt": float}}` |
-| `_handle_set_yaw` | `{"status": "ok", "yaw_deg": float}` |
-| `_handle_set_speed` | `{"status": "ok", "speed_ms": float}` |
-| `_handle_wait_altitude` | `{"status": "altitude_reached", "altitude": float}` |
-| `_handle_wait_arrival` | `{"status": "arrived"}` |
-| `_handle_wait_time` | `{"status": "done", "waited_seconds": float}` |
-
-On any failure, return `{"error": "<description>"}` — the dispatcher treats this as a retryable error and increments the retry counter.
-
-> **Critical**: `safety_policy.py` reads `level_percent` (not `percent` or `battery_pct`) from the `get_battery` response to enforce battery thresholds. This field name is non-negotiable.
-
-### Testing the Adapter
-Mirror `tests/test_tools.py` — it covers all 18 handlers for `SimAdapter` and is the template for MAVLink tests. Adapter tests are **not async** (the `asyncio.to_thread` wrapping is the dispatcher's job):
-
-```python
-@pytest.fixture
-def mav():
-    adapter = MAVLinkAdapter("udp:127.0.0.1:14550")
-    # mock self._conn if testing without hardware
-    return adapter
-
-def test_get_battery_shape(mav):
-    result = mav.execute("get_battery", {})
-    assert "level_percent" in result  # must match — safety_policy reads this key
-    assert "voltage" in result
-```
+On any failure, handlers return `{"error": "<description>"}` — the dispatcher treats this as a retryable error and increments the retry counter.
 
 ## Configuration (`config.py`)
 
 Key env vars:
-- `GEMINI_API_KEY` — Gemini API key
+- `GEMINI_API_KEY` — Gemini API key (a default is hardcoded for dev; override in env for anything real)
 - `DRONE_BACKEND` — `"sim"` (default) or `"mavlink"`
-- `MAVLINK_URI` — MAVLink connection string (default: `udp:127.0.0.1:14550`)
+- `MAVLINK_URI` — MAVLink connection string (default: `tcp:127.0.0.1:5762`)
 
 Safety thresholds (all configurable):
-- Battery critical: 15% → failsafe; Battery low: 25% → warn
+- Battery critical: 15% → failsafe; Battery low: 25% → planner `REPLAN` toward RTH
 - Altitude ceiling: 120m
 - Max speed: 15 m/s
 - Telemetry stale: 5s → wait; 10s → emergency failsafe
@@ -163,4 +126,14 @@ Safety thresholds (all configurable):
 
 ## Testing
 
-Framework: `pytest` + `pytest-asyncio`. All test files are in `tests/`. Each major subsystem has its own test file covering normal paths, error/retry paths, and state transitions.
+Framework: `pytest` + `pytest-asyncio`. Tests live in `tests/`:
+
+| File | Covers |
+|---|---|
+| `test_state_machine.py` | Legal/illegal transitions, force_failsafe, is_airborne |
+| `test_schemas.py` | `ToolResponse`, `WaitInstruction`, `ErrorSchema` serialization |
+| `test_tools.py` | All 18 `_handle_*` shapes for `SimAdapter` — template for adapter tests |
+| `test_failures.py` | Planner decision table + all `SafetyPolicy` checks |
+| `test_workflows.py` | End-to-end workflow coroutines with a mocked dispatcher |
+
+Workflow tests inject an `AsyncMock` dispatcher and use `ToolResponse.success()` / `ToolResponse.failure()` helpers — see `tests/test_workflows.py:13-17`. Adapter tests are **not async** (the `asyncio.to_thread` wrapping is the dispatcher's job).

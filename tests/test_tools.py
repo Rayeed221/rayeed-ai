@@ -138,6 +138,34 @@ def test_get_distance(sim):
     assert "bearing" in result
 
 
+# ── Snapshot + get_status ─────────────────────────────────────────────────────
+
+def test_snapshot_shape(sim):
+    snap = sim.snapshot()
+    for key in ("connected", "armed", "mode", "altitude", "battery_pct",
+                "lat", "lon", "heading", "ekf_ok", "landed_state", "timestamp"):
+        assert key in snap, f"snapshot missing '{key}'"
+
+
+def test_get_status_returns_snapshot(sim):
+    result = sim.execute("get_status", {})
+    assert result["mode"] == "STABILIZE"
+    assert result["battery_pct"] > 0
+    assert result["ekf_ok"] is True
+
+
+def test_snapshot_reflects_takeoff(sim):
+    sim.execute("takeoff", {"altitude": 12.0})
+    snap = sim.snapshot()
+    assert snap["altitude"] == 12.0
+    assert snap["landed_state"] == 2  # in_air
+
+
+def test_snapshot_battery_key_matches_safety_contract(sim):
+    """battery_pct in snapshot feeds safety_policy — must remain stable."""
+    assert "battery_pct" in sim.snapshot()
+
+
 # ── Unknown tool ──────────────────────────────────────────────────────────────
 
 def test_unknown_tool_returns_error(sim):

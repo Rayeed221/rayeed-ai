@@ -1,4 +1,5 @@
 import math
+import time
 import logging
 
 from adapters.base_adapter import BaseAdapter
@@ -20,6 +21,8 @@ class SimAdapter(BaseAdapter):
         self._altitude    = 0.0
         self._lat         = 23.8103
         self._lon         = 90.4125
+        self._home_lat    = 23.8103
+        self._home_lon    = 90.4125
         self._heading     = 0.0
         self._speed       = 5.0
         self._battery_pct = 95.0
@@ -36,6 +39,31 @@ class SimAdapter(BaseAdapter):
         if handler is None:
             return {"error": f"SimAdapter: no handler for '{tool_name}'"}
         return handler(**args)
+
+    def snapshot(self) -> dict:
+        airborne = self._altitude > 0.5
+        return {
+            "connected":     self._connected,
+            "armed":         self._armed,
+            "mode":          self._mode,
+            "system_status": "ACTIVE" if self._connected else "STANDBY",
+            "landed_state":  2 if airborne else 1,   # 1=on_ground, 2=in_air
+            "altitude":      round(self._altitude, 2),
+            "airspeed":      round(self._speed, 2),
+            "groundspeed":   round(self._speed, 2),
+            "heading":       round(self._heading, 1),
+            "lat":           self._lat,
+            "lon":           self._lon,
+            "home_lat":      self._home_lat,
+            "home_lon":      self._home_lon,
+            "home_set":      True,
+            "voltage":       12.4,
+            "current":       0.5,
+            "battery_pct":   round(self._battery_pct, 2),
+            "ekf_ok":        True,
+            "wp_dist":       0.0,
+            "timestamp":     time.time(),
+        }
 
     # ── Handlers ─────────────────────────────────────────────────────────────
 
@@ -74,6 +102,9 @@ class SimAdapter(BaseAdapter):
         bearing = math.degrees(math.atan2(dlon, dlat)) % 360
         return {"distance_str": f"{dist:.1f} meters", "bearing": round(bearing, 1)}
 
+    def _handle_get_status(self):
+        return self.snapshot()
+
     def _handle_set_mode(self, mode: str):
         self._mode = mode
         return {"status": "ok", "mode": mode}
@@ -96,8 +127,8 @@ class SimAdapter(BaseAdapter):
         return {"status": "landing"}
 
     def _handle_return_to_launch(self):
-        self._lat = 23.8103
-        self._lon = 90.4125
+        self._lat = self._home_lat
+        self._lon = self._home_lon
         return {"status": "returning_to_launch"}
 
     def _handle_goto_position(self, lat: float, lon: float, alt: float):

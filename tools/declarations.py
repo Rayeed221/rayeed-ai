@@ -40,6 +40,15 @@ FUNCTION_DECLARATIONS = [
             required=["target_lat", "target_lon"],
         ),
     ),
+    types.FunctionDeclaration(
+        name="get_status",
+        description=(
+            "Unified live snapshot — returns mode, armed flag, altitude, battery %, "
+            "position (lat/lon), heading, groundspeed, EKF health, and landed state "
+            "in a single call. Prefer this over individual get_* tools."
+        ),
+        parameters=types.Schema(type=types.Type.OBJECT, properties={}, required=[]),
+    ),
     # ── Connection ───────────────────────────────────────────────────────────
     types.FunctionDeclaration(
         name="connect_drone",
@@ -168,6 +177,39 @@ FUNCTION_DECLARATIONS = [
                 "seconds": types.Schema(type=types.Type.NUMBER, description="Duration in seconds"),
             },
             required=["seconds"],
+        ),
+    ),
+    # ── Intent verbs (handled by workflow router, not primitive dispatcher) ──
+    # These override the primitive with the same name (takeoff / goto_position /
+    # land / return_to_launch) — the LLM sees one tool, but calling it runs the
+    # full workflow (set_mode + arm + takeoff + wait_altitude, etc.).
+    types.FunctionDeclaration(
+        name="hold_position",
+        description=(
+            "Hold current position for N seconds — used for inspection or "
+            "photography. Optionally orient to a yaw angle first."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "seconds": types.Schema(type=types.Type.NUMBER, description="Hold duration in seconds"),
+                "yaw_deg": types.Schema(type=types.Type.NUMBER, description="Optional yaw orientation (0–360°)"),
+            },
+            required=["seconds"],
+        ),
+    ),
+    types.FunctionDeclaration(
+        name="emergency_stop",
+        description=(
+            "Immediately trigger the failsafe: set RTL mode, attempt land, "
+            "and disarm. Use only for user-commanded emergencies."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "reason": types.Schema(type=types.Type.STRING, description="Short reason for the emergency"),
+            },
+            required=[],
         ),
     ),
 ]

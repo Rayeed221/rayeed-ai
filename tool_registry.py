@@ -46,6 +46,12 @@ TOOL_REGISTRY: dict = {
         "permission_level": "read",
         "allowed_states": None,
     },
+    "get_status": {
+        "description": "Unified live snapshot: mode, armed, altitude, battery, position, heading, EKF, landed state.",
+        "args_schema": {},
+        "permission_level": "read",
+        "allowed_states": None,
+    },
     "set_mode": {
         "description": "Change the drone flight mode.",
         "args_schema": {"mode": {"type": "string", "required": True}},

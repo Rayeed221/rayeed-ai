@@ -31,7 +31,7 @@ from config import (
     BACKEND, MAVLINK_URI,
 )
 from schemas import ToolResponse
-from state_machine import StateMachine
+from state_machine import StateMachine, MissionState
 from safety_policy import SafetyPolicy
 from tool_dispatcher import ToolDispatcher
 from planner import Planner, PlanDecision
@@ -44,6 +44,7 @@ from telemetry.position_monitor import PositionMonitor
 from memory.mission_memory import MissionMemory
 from memory.environment_memory import EnvironmentMemory
 from tools.declarations import FUNCTION_DECLARATIONS
+from workflows.registry import WORKFLOW_INTENTS, is_intent, resolve_kwargs
 
 logging.basicConfig(
     level=logging.INFO,
@@ -126,10 +127,10 @@ class DroneAI:
         self.mic_capture    = MicCapture(self.pya, self.mic_queue)
         self.playback       = Playback(self.pya, self.audio_in_queue)
 
-        # ── Telemetry (background tasks) ────────────────────────────────────
-        self.tel_reader     = TelemetryReader(self.dispatcher, self.safety)
-        self.bat_monitor    = BatteryMonitor(self.dispatcher, self.safety, self.planner)
-        self.pos_monitor    = PositionMonitor(self.dispatcher)
+        # ── Telemetry (background tasks — read directly from adapter.snapshot()) ──
+        self.tel_reader     = TelemetryReader(self.adapter, self.safety)
+        self.bat_monitor    = BatteryMonitor(self.adapter, self.safety, self.planner)
+        self.pos_monitor    = PositionMonitor(self.adapter)
 
         # ── Memory (persistent state) ────────────────────────────────────────
         self.mission_mem    = MissionMemory()
@@ -144,6 +145,49 @@ class DroneAI:
                 await self.session.send_realtime_input(
                     audio=types.Blob(data=data, mime_type="audio/pcm")
                 )
+
+    # ── Tool-call router ───────────────────────────────────────────────────────
+
+    async def _route_tool_call(self, name: str, args: dict) -> ToolResponse:
+        """
+        Route an LLM tool call. Priority:
+          1. emergency_stop → planner.trigger_failsafe
+          2. workflow intent (takeoff, fly_to, land, return_home, hold_position) → workflow
+          3. everything else → primitive tool dispatcher
+        """
+        if name == "emergency_stop":
+            reason = args.get("reason", "LLM requested emergency_stop")
+            await self.planner.trigger_failsafe(reason=reason)
+            return ToolResponse.success(
+                tool=name, state=self.sm.state.value,
+                data={"completed": True, "reason": reason},
+            )
+
+        if is_intent(name):
+            return await self._run_workflow_intent(name, args)
+
+        return await self.dispatcher.dispatch(name, args)
+
+    async def _run_workflow_intent(self, name: str, args: dict) -> ToolResponse:
+        spec   = WORKFLOW_INTENTS[name]
+        kwargs = resolve_kwargs(name, args)
+        logger.info(f"[INTENT] {name}({kwargs})")
+        try:
+            success = await self.planner.run_workflow(spec.fn, **kwargs)
+        except Exception as exc:
+            logger.exception(f"[INTENT] {name} exception")
+            return ToolResponse.failure(
+                tool=name, state=self.sm.state.value, error=str(exc),
+            )
+        if success:
+            return ToolResponse.success(
+                tool=name, state=self.sm.state.value,
+                data={"completed": True, **kwargs},
+            )
+        return ToolResponse.failure(
+            tool=name, state=self.sm.state.value,
+            error=f"'{name}' workflow did not complete",
+        )
 
     # ── Extract thought + text parts from server_content ──────────────────────
 
@@ -190,14 +234,14 @@ class DroneAI:
                     # ── Thought + text parts (log + voice if available) ──────
                     self._log_model_parts(response)
 
-                    # ── Tool call → dispatcher → planner ────────────────────
+                    # ── Tool call → intent router → dispatcher → planner ────
                     if tool_call := response.tool_call:
                         for fc in tool_call.function_calls:
                             args = dict(fc.args) if fc.args else {}
                             logger.info(f"[LLM] Tool call: {fc.name}({args})")
 
-                            # Dispatcher: validate → safety → adapter → normalize → state
-                            tool_resp: ToolResponse = await self.dispatcher.dispatch(fc.name, args)
+                            # Router: workflow intent, emergency_stop, or primitive
+                            tool_resp: ToolResponse = await self._route_tool_call(fc.name, args)
 
                             # Planner authority: may override LLM next_action
                             decision = self.planner.decide(tool_resp)
@@ -208,9 +252,12 @@ class DroneAI:
                                 self.planner.schedule_wait(tool_resp.wait)
 
                             elif decision in (PlanDecision.FAILSAFE, PlanDecision.ABORT):
-                                await self.planner.trigger_failsafe(
-                                    reason=tool_resp.error or f"planner {decision.value}"
-                                )
+                                # Guard: intent workflows may have already triggered failsafe.
+                                # Don't re-run the emergency workflow if we're already there.
+                                if self.sm.state != MissionState.FAILSAFE:
+                                    await self.planner.trigger_failsafe(
+                                        reason=tool_resp.error or f"planner {decision.value}"
+                                    )
 
                             elif decision == PlanDecision.REPLAN:
                                 logger.warning("[PLANNER] Low battery — replanning toward RTH")

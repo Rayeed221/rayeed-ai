@@ -6,25 +6,26 @@ logger = logging.getLogger(__name__)
 
 class PositionMonitor:
     """
-    Periodically reads GPS position via get_position_str.
-    Cached value available via .latest() for workflows and memory.
-    Runs as an independent asyncio task.
+    Caches the latest GPS position from adapter.snapshot() for workflows and
+    memory. No dispatcher call — reads directly from the streamer cache.
     """
 
-    def __init__(self, dispatcher, interval: float = 5.0):
-        self._dispatcher = dispatcher
-        self._interval   = interval
-        self._latest:    dict = {}
+    def __init__(self, adapter, interval: float = 1.0):
+        self._adapter  = adapter
+        self._interval = interval
+        self._latest:  dict = {}
 
     async def run(self):
         while True:
             try:
-                resp = await self._dispatcher.dispatch("get_position_str", {})
-                if resp.ok:
-                    self._latest = resp.data
-                    logger.debug(f"[POSITION] {resp.data.get('position')}")
-                else:
-                    logger.warning(f"[POSITION] Poll failed: {resp.error}")
+                snap = self._adapter.snapshot()
+                if "lat" in snap:
+                    self._latest = {
+                        "lat":      snap["lat"],
+                        "lon":      snap["lon"],
+                        "altitude": snap.get("altitude", 0.0),
+                        "heading":  snap.get("heading", 0.0),
+                    }
             except Exception as exc:
                 logger.warning(f"[POSITION] Exception: {exc}")
             await asyncio.sleep(self._interval)

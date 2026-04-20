@@ -165,3 +165,33 @@ async def test_emergency_handles_dispatch_failure(dispatcher, sm, safety, planne
     dispatcher.dispatch.side_effect = Exception("link lost")
     result = await run_emergency(dispatcher, sm, safety, planner, reason="link lost")
     assert result is True  # emergency always completes — never raises
+
+
+# ── Intent registry ───────────────────────────────────────────────────────────
+
+def test_intent_registry_covers_all_verbs():
+    from workflows.registry import WORKFLOW_INTENTS, is_intent
+    for verb in ("takeoff", "goto_position", "land", "return_to_launch", "hold_position"):
+        assert is_intent(verb), f"missing intent: {verb}"
+    assert not is_intent("emergency_stop")  # handled directly in app.py, not via registry
+    assert not is_intent("get_status")
+    assert not is_intent("nonexistent")
+
+
+def test_resolve_kwargs_drops_unknown_and_none():
+    from workflows.registry import resolve_kwargs
+    # goto_position: speed_ms maps, yaw_deg maps, unknown key dropped, None dropped
+    kwargs = resolve_kwargs("goto_position", {
+        "lat":      23.8, "lon": 90.4, "alt": 10.0,
+        "speed_ms": 8.0,
+        "yaw_deg":  None,
+        "extra":    "ignore me",
+    })
+    assert kwargs == {"lat": 23.8, "lon": 90.4, "alt": 10.0, "speed_ms": 8.0}
+
+
+def test_resolve_kwargs_hold_position_remaps():
+    from workflows.registry import resolve_kwargs
+    # LLM sends `seconds` → workflow expects `hold_seconds`
+    kwargs = resolve_kwargs("hold_position", {"seconds": 5.0, "yaw_deg": 90.0})
+    assert kwargs == {"hold_seconds": 5.0, "yaw_deg": 90.0}
