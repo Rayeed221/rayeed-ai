@@ -25,6 +25,7 @@ class SafetyPolicy:
         self._last_tel_time:   float = 0.0
         self._last_battery:    float = 100.0
         self._last_altitude:   float = 0.0
+        self._ekf_ok:          bool | None = None   # None = not yet known (sim boot)
 
     # ── Live value updates ────────────────────────────────────────────────────
 
@@ -36,6 +37,9 @@ class SafetyPolicy:
 
     def update_altitude(self, alt_m: float):
         self._last_altitude = alt_m
+
+    def update_ekf(self, ok: bool):
+        self._ekf_ok = ok
 
     # ── Individual checks ─────────────────────────────────────────────────────
 
@@ -95,6 +99,17 @@ class SafetyPolicy:
                 message=f"Speed {speed_ms} m/s exceeds max {MAX_SPEED_MS} m/s",
                 retryable=False,
                 context={"requested": speed_ms, "max": MAX_SPEED_MS},
+            )
+        return None
+
+    def check_ekf_health(self) -> ErrorSchema | None:
+        # Only block when explicitly False. None (unknown / sim boot) is permissive.
+        if self._ekf_ok is False:
+            return ErrorSchema(
+                code="EKF_UNHEALTHY",
+                message="EKF unhealthy — attitude/horizontal-velocity/absolute-position not all valid",
+                retryable=True,
+                context={},
             )
         return None
 
@@ -165,6 +180,14 @@ class SafetyPolicy:
         # Tool-specific argument checks
         if tool_name == "takeoff":
             err = self.check_altitude(target_alt=args.get("altitude", 0))
+            if err:
+                return err
+            err = self.check_ekf_health()
+            if err:
+                return err
+
+        if tool_name == "arm_drone":
+            err = self.check_ekf_health()
             if err:
                 return err
 

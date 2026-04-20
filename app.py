@@ -327,6 +327,22 @@ class DroneAI:
         """
         loop = asyncio.get_event_loop()
 
+        # ── Auto-connect the adapter before anything else — LLM no longer
+        #    needs a connect_drone tool. Failure is logged but non-fatal:
+        #    snapshot() will keep returning empty and safety gates will block ops.
+        try:
+            conn_arg = MAVLINK_URI if BACKEND == "mavlink" else "sim"
+            result = await asyncio.to_thread(
+                self.adapter.execute, "connect_drone", {"connection_string": conn_arg}
+            )
+            if result.get("error"):
+                logger.error(f"[AUTO-CONNECT] Failed: {result['error']}")
+            else:
+                self.sm.transition(MissionState.CONNECTED)
+                logger.info(f"[AUTO-CONNECT] Drone connected ({BACKEND})")
+        except Exception as exc:
+            logger.error(f"[AUTO-CONNECT] Exception: {exc}")
+
         # ── Background tasks started before session opens ──────────────────
         background_tasks = [
             loop.create_task(self.tel_reader.run(),  name="telemetry_reader"),

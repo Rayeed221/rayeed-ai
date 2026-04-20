@@ -2,198 +2,96 @@ from google.genai import types
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Gemini Function Declarations
-# These are the tool schemas exposed to the LLM.
-# Low-level tools kept (Decision 3A) + high-level workflow triggers added.
+#
+# Compact LLM-facing surface: 7 intent-based tools. The LLM does NOT see
+# primitives (set_mode, arm, wait_*, etc.); those live in tool_registry.py
+# and are composed internally by workflows.
+#
+# Routing (see app.py._route_tool_call):
+#   emergency_stop                                → planner.trigger_failsafe
+#   takeoff / goto_position / land /
+#   return_to_launch / hold_position              → workflows (registry.py)
+#   get_status                                    → adapter.snapshot()
 # ─────────────────────────────────────────────────────────────────────────────
 
 FUNCTION_DECLARATIONS = [
-    # ── Read-only telemetry ───────────────────────────────────────────────────
-    types.FunctionDeclaration(
-        name="get_current_state",
-        description="Retrieve the drone's current flight mode, armed status, and system status.",
-        parameters=types.Schema(type=types.Type.OBJECT, properties={}, required=[]),
-    ),
-    types.FunctionDeclaration(
-        name="get_telemetry",
-        description="Fetch real-time telemetry: altitude, airspeed, groundspeed, heading.",
-        parameters=types.Schema(type=types.Type.OBJECT, properties={}, required=[]),
-    ),
-    types.FunctionDeclaration(
-        name="get_position_str",
-        description="Get the drone's current GPS position as a human-readable string.",
-        parameters=types.Schema(type=types.Type.OBJECT, properties={}, required=[]),
-    ),
-    types.FunctionDeclaration(
-        name="get_battery",
-        description="Check battery voltage, current draw, and remaining percentage.",
-        parameters=types.Schema(type=types.Type.OBJECT, properties={}, required=[]),
-    ),
-    types.FunctionDeclaration(
-        name="get_distance_to_str",
-        description="Get distance and bearing to a GPS target coordinate.",
-        parameters=types.Schema(
-            type=types.Type.OBJECT,
-            properties={
-                "target_lat": types.Schema(type=types.Type.NUMBER, description="Target latitude"),
-                "target_lon": types.Schema(type=types.Type.NUMBER, description="Target longitude"),
-            },
-            required=["target_lat", "target_lon"],
-        ),
-    ),
+    # ── Telemetry (single unified snapshot) ───────────────────────────────────
     types.FunctionDeclaration(
         name="get_status",
         description=(
-            "Unified live snapshot — returns mode, armed flag, altitude, battery %, "
-            "position (lat/lon), heading, groundspeed, EKF health, and landed state "
-            "in a single call. Prefer this over individual get_* tools."
+            "Return a unified live snapshot of the drone: mode, armed flag, "
+            "altitude, battery percentage, GPS position (lat/lon), heading, "
+            "groundspeed, EKF health, landed state, and home position. Prefer "
+            "this one call over multiple individual queries."
         ),
         parameters=types.Schema(type=types.Type.OBJECT, properties={}, required=[]),
     ),
-    # ── Connection ───────────────────────────────────────────────────────────
-    types.FunctionDeclaration(
-        name="connect_drone",
-        description="Establish a MAVLink connection to the drone.",
-        parameters=types.Schema(
-            type=types.Type.OBJECT,
-            properties={
-                "connection_string": types.Schema(
-                    type=types.Type.STRING,
-                    description="MAVLink URI e.g. 'tcp:127.0.0.1:5760'",
-                )
-            },
-            required=[],
-        ),
-    ),
-    # ── Mode + arming ─────────────────────────────────────────────────────────
-    types.FunctionDeclaration(
-        name="set_mode",
-        description="Change the drone's flight mode (e.g. GUIDED, LOITER, AUTO, RTL).",
-        parameters=types.Schema(
-            type=types.Type.OBJECT,
-            properties={
-                "mode": types.Schema(type=types.Type.STRING, description="Flight mode name"),
-            },
-            required=["mode"],
-        ),
-    ),
-    types.FunctionDeclaration(
-        name="arm_drone",
-        description="Arm the drone's motors to prepare for flight.",
-        parameters=types.Schema(type=types.Type.OBJECT, properties={}, required=[]),
-    ),
-    types.FunctionDeclaration(
-        name="disarm_drone",
-        description="Disarm the drone's motors after landing.",
-        parameters=types.Schema(type=types.Type.OBJECT, properties={}, required=[]),
-    ),
-    # ── Flight commands ───────────────────────────────────────────────────────
+
+    # ── Intent verbs (run full workflows) ─────────────────────────────────────
     types.FunctionDeclaration(
         name="takeoff",
-        description="Command the drone to take off to a specified altitude in meters.",
+        description=(
+            "Take off to a specified altitude in meters. Automatically switches "
+            "to GUIDED mode, arms the motors, and waits until the target "
+            "altitude is reached. Use when starting a mission from the ground."
+        ),
         parameters=types.Schema(
             type=types.Type.OBJECT,
             properties={
-                "altitude": types.Schema(type=types.Type.NUMBER, description="Target altitude in meters"),
+                "altitude": types.Schema(
+                    type=types.Type.NUMBER,
+                    description="Target altitude in meters (max 120 m)",
+                ),
             },
             required=["altitude"],
         ),
     ),
     types.FunctionDeclaration(
-        name="land",
-        description="Command the drone to land at its current location.",
-        parameters=types.Schema(type=types.Type.OBJECT, properties={}, required=[]),
-    ),
-    types.FunctionDeclaration(
-        name="return_to_launch",
-        description="Command the drone to return to its home/launch point and land.",
-        parameters=types.Schema(type=types.Type.OBJECT, properties={}, required=[]),
-    ),
-    types.FunctionDeclaration(
         name="goto_position",
-        description="Fly the drone to a specific GPS coordinate and altitude.",
+        description=(
+            "Fly the drone to a GPS coordinate at a given altitude. Optionally "
+            "override cruise speed and yaw heading. The drone must already be "
+            "airborne — call takeoff first if it is on the ground."
+        ),
         parameters=types.Schema(
             type=types.Type.OBJECT,
             properties={
-                "lat": types.Schema(type=types.Type.NUMBER, description="Target latitude"),
-                "lon": types.Schema(type=types.Type.NUMBER, description="Target longitude"),
-                "alt": types.Schema(type=types.Type.NUMBER, description="Target altitude in meters"),
+                "lat":      types.Schema(type=types.Type.NUMBER, description="Target latitude"),
+                "lon":      types.Schema(type=types.Type.NUMBER, description="Target longitude"),
+                "alt":      types.Schema(type=types.Type.NUMBER, description="Target altitude in meters"),
+                "speed_ms": types.Schema(type=types.Type.NUMBER, description="Optional cruise speed m/s (default 5, max 15)"),
+                "yaw_deg":  types.Schema(type=types.Type.NUMBER, description="Optional yaw heading 0–360°"),
             },
             required=["lat", "lon", "alt"],
         ),
     ),
     types.FunctionDeclaration(
-        name="set_yaw",
-        description="Set the drone's yaw heading to a specific angle.",
-        parameters=types.Schema(
-            type=types.Type.OBJECT,
-            properties={
-                "yaw_deg":  types.Schema(type=types.Type.NUMBER,  description="Yaw in degrees (0–360)"),
-                "relative": types.Schema(type=types.Type.BOOLEAN, description="True = relative to current heading"),
-            },
-            required=["yaw_deg"],
+        name="land",
+        description=(
+            "Land the drone at its current position. Waits for ground contact "
+            "then disarms the motors."
         ),
+        parameters=types.Schema(type=types.Type.OBJECT, properties={}, required=[]),
     ),
     types.FunctionDeclaration(
-        name="set_speed",
-        description="Set the drone's target flight speed in m/s.",
-        parameters=types.Schema(
-            type=types.Type.OBJECT,
-            properties={
-                "speed_ms": types.Schema(type=types.Type.NUMBER, description="Speed in meters per second"),
-            },
-            required=["speed_ms"],
+        name="return_to_launch",
+        description=(
+            "Return the drone to its home/launch point and land. Waits for "
+            "arrival at home then lands and disarms."
         ),
+        parameters=types.Schema(type=types.Type.OBJECT, properties={}, required=[]),
     ),
-    # ── Wait / polling ────────────────────────────────────────────────────────
-    types.FunctionDeclaration(
-        name="wait_altitude",
-        description="Block until the drone reaches the target altitude within tolerance.",
-        parameters=types.Schema(
-            type=types.Type.OBJECT,
-            properties={
-                "target_alt": types.Schema(type=types.Type.NUMBER, description="Target altitude in meters"),
-                "tolerance":  types.Schema(type=types.Type.NUMBER, description="Acceptable tolerance in meters"),
-            },
-            required=["target_alt"],
-        ),
-    ),
-    types.FunctionDeclaration(
-        name="wait_arrival",
-        description="Block until the drone arrives at its navigation target.",
-        parameters=types.Schema(
-            type=types.Type.OBJECT,
-            properties={
-                "tolerance_m": types.Schema(type=types.Type.NUMBER, description="Arrival radius in meters"),
-            },
-            required=[],
-        ),
-    ),
-    types.FunctionDeclaration(
-        name="wait_time",
-        description="Pause drone actions for a specified number of seconds.",
-        parameters=types.Schema(
-            type=types.Type.OBJECT,
-            properties={
-                "seconds": types.Schema(type=types.Type.NUMBER, description="Duration in seconds"),
-            },
-            required=["seconds"],
-        ),
-    ),
-    # ── Intent verbs (handled by workflow router, not primitive dispatcher) ──
-    # These override the primitive with the same name (takeoff / goto_position /
-    # land / return_to_launch) — the LLM sees one tool, but calling it runs the
-    # full workflow (set_mode + arm + takeoff + wait_altitude, etc.).
     types.FunctionDeclaration(
         name="hold_position",
         description=(
-            "Hold current position for N seconds — used for inspection or "
-            "photography. Optionally orient to a yaw angle first."
+            "Hold current position for a given number of seconds — used for "
+            "inspection or photography. Optionally orient to a yaw angle."
         ),
         parameters=types.Schema(
             type=types.Type.OBJECT,
             properties={
                 "seconds": types.Schema(type=types.Type.NUMBER, description="Hold duration in seconds"),
-                "yaw_deg": types.Schema(type=types.Type.NUMBER, description="Optional yaw orientation (0–360°)"),
+                "yaw_deg": types.Schema(type=types.Type.NUMBER, description="Optional yaw orientation 0–360°"),
             },
             required=["seconds"],
         ),
@@ -201,13 +99,17 @@ FUNCTION_DECLARATIONS = [
     types.FunctionDeclaration(
         name="emergency_stop",
         description=(
-            "Immediately trigger the failsafe: set RTL mode, attempt land, "
-            "and disarm. Use only for user-commanded emergencies."
+            "Immediately trigger the drone's failsafe: set RTL mode, attempt "
+            "to land, and disarm. Use only when the user commands an emergency "
+            "or a safety-critical situation arises mid-mission."
         ),
         parameters=types.Schema(
             type=types.Type.OBJECT,
             properties={
-                "reason": types.Schema(type=types.Type.STRING, description="Short reason for the emergency"),
+                "reason": types.Schema(
+                    type=types.Type.STRING,
+                    description="Short reason string for logging",
+                ),
             },
             required=[],
         ),

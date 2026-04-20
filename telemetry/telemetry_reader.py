@@ -27,6 +27,8 @@ class TelemetryReader:
                     self._safety.update_telemetry_timestamp()
                     if "altitude" in snap:
                         self._safety.update_altitude(snap["altitude"])
+                    if "ekf_ok" in snap:
+                        self._safety.update_ekf(snap["ekf_ok"])
             except Exception as exc:
                 logger.warning(f"[TELEMETRY] Exception: {exc}")
             await asyncio.sleep(self._interval)

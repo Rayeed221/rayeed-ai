@@ -23,6 +23,14 @@ async def run_navigation(
 ) -> bool:
     logger.info(f"[NAV] Navigating to ({lat:.6f}, {lon:.6f}, {alt}m) @ {speed_ms} m/s")
 
+    # Auto-takeoff if grounded — LLM no longer needs to sequence takeoff before goto.
+    if not sm.is_airborne():
+        logger.info(f"[NAV] Not airborne — auto-takeoff to {alt}m first")
+        from workflows.takeoff import run_takeoff
+        if not await run_takeoff(dispatcher, sm, safety, planner, altitude=alt):
+            logger.error("[NAV] Auto-takeoff failed — aborting navigation")
+            return False
+
     # Step 1: Set speed
     await planner.execute_step("set_speed", {"speed_ms": speed_ms})
 
