@@ -13,7 +13,7 @@ CHANNELS            = 1
 # ─── Backend ────────────────────────────────────────────────────────────────
 # Options: "sim" | "mavlink"
 # BACKEND     = os.environ.get("DRONE_BACKEND", "sim")
-BACKEND     = os.environ.get("DRONE_BACKEND", "sim")
+BACKEND     = os.environ.get("DRONE_BACKEND", "mavlink")
 
 MAVLINK_URI = os.environ.get("MAVLINK_URI", "tcp:127.0.0.1:5762")
 
@@ -28,7 +28,7 @@ MAX_RETRY_COUNT       = 3         # before abort
 
 # ─── Planner ────────────────────────────────────────────────────────────────
 WAIT_POLL_INTERVAL   = 0.2        # seconds between wait checks
-PLANNER_LOOP_INTERVAL = 0.1       # seconds between planner ticks
+PLANNER_LOOP_INTERVAL = 0.2       # seconds between planner ticks
 
 # ─── State Persistence ──────────────────────────────────────────────────────
 STATE_FILE  = "mission_state.json"
