@@ -29,6 +29,9 @@ from config import (
     GEMINI_API_KEY, MODEL, VOICE_NAME,
     CONTEXT_TRIGGER_TOKENS, CONTEXT_TARGET_TOKENS,
     BACKEND, MAVLINK_URI,
+    VISION_ENABLED, VISION_FPS, VISION_DEPTH_MIN_MM, VISION_DEPTH_MAX_MM,
+    VISION_BLOB_NAME, VISION_BLOB_SHAVES,
+    VISION_CAMERA_PITCH_DEG, VISION_CAMERA_YAW_DEG, VISION_CAMERA_HFOV_DEG,
 )
 from schemas import ToolResponse
 from state_machine import StateMachine
@@ -62,6 +65,62 @@ def build_adapter():
     from adapters.sim_adapter import SimAdapter
     logger.info("[BACKEND] Simulator")
     return SimAdapter()
+
+
+# ── Vision + Localization factory ─────────────────────────────────────────────
+
+def build_vision(localizer=None):
+    """
+    Attempt to build an OakPipeline + VisionTool for the OAK-D Lite.
+
+    Failures are non-fatal: if the camera is absent or depthai is not
+    installed, vision tools will return errors at call-time rather than
+    crashing the whole app.
+
+    Args:
+        localizer: Optional Localizer instance to inject into VisionTool.
+
+    Returns (OakPipeline | None, VisionTool | None).
+    """
+    if not VISION_ENABLED:
+        logger.info("[VISION] Disabled (VISION_ENABLED=0)")
+        return None, None
+
+    try:
+        from vision.oak_pipeline import OakPipeline
+        from vision.vision_tool import VisionTool
+    except ImportError as exc:
+        logger.warning(f"[VISION] depthai not installed — vision tools disabled ({exc})")
+        return None, None
+
+    # Try to download the YOLO blob (non-fatal if offline or blob unavailable)
+    blob_path = None
+    try:
+        import blobconverter
+        blob_path = blobconverter.from_zoo(
+            name=VISION_BLOB_NAME,
+            shaves=VISION_BLOB_SHAVES,
+            zoo_type="depthai",
+            use_cache=True,
+        )
+        logger.info(f"[VISION] YOLO blob ready: {blob_path}")
+    except Exception as exc:
+        logger.warning(f"[VISION] Blob download failed ({exc}) — detection tool disabled")
+
+    # Start the OAK-D pipeline (non-fatal if camera not connected)
+    try:
+        pipeline = OakPipeline(
+            fps=VISION_FPS,
+            blob_path=blob_path,
+            depth_min_mm=VISION_DEPTH_MIN_MM,
+            depth_max_mm=VISION_DEPTH_MAX_MM,
+        )
+        pipeline.start()
+        vision_tool = VisionTool(pipeline, localizer=localizer)
+        return pipeline, vision_tool
+    except Exception as exc:
+        logger.warning(f"[VISION] OAK-D init failed ({exc}) — vision tools disabled")
+        return None, None
 
 
 # ── Gemini client + live config ────────────────────────────────────────────────
@@ -113,10 +172,25 @@ class DroneAI:
         # ── Layer 5: Backend ────────────────────────────────────────────────
         self.adapter        = build_adapter()
 
+        # ── Localization: PoseCache + Localizer ─────────────────────────────
+        # Built before Vision so the Localizer can be injected into VisionTool.
+        from localization.pose_cache import PoseCache
+        from localization.localizer import Localizer
+        self.pose_cache     = PoseCache()
+        self.localizer      = Localizer(
+            self.pose_cache,
+            camera_pitch_deg=VISION_CAMERA_PITCH_DEG,
+            camera_yaw_deg=VISION_CAMERA_YAW_DEG,
+            hfov_deg=VISION_CAMERA_HFOV_DEG,
+        )
+
+        # ── Layer 0: Vision (OAK-D Lite) — non-fatal if camera absent ───────
+        self.oak_pipeline, _vision_tool = build_vision(localizer=self.localizer)
+
         # ── Layer 4: Safe execution ─────────────────────────────────────────
         self.sm             = StateMachine()
         self.safety         = SafetyPolicy(self.sm)
-        self.dispatcher     = ToolDispatcher(self.sm, self.safety, self.adapter)
+        self.dispatcher     = ToolDispatcher(self.sm, self.safety, self.adapter, _vision_tool)
 
         # ── Layer 3: Mission planning ────────────────────────────────────────
         self.planner        = Planner(self.sm, self.safety, self.dispatcher)
@@ -126,10 +200,10 @@ class DroneAI:
         self.mic_capture    = MicCapture(self.pya, self.mic_queue)
         self.playback       = Playback(self.pya, self.audio_in_queue)
 
-        # ── Telemetry (background tasks) ────────────────────────────────────
-        self.tel_reader     = TelemetryReader(self.dispatcher, self.safety)
+        # ── Telemetry (background tasks) — pose_cache injected for localization
+        self.tel_reader     = TelemetryReader(self.dispatcher, self.safety, self.pose_cache)
         self.bat_monitor    = BatteryMonitor(self.dispatcher, self.safety, self.planner)
-        self.pos_monitor    = PositionMonitor(self.dispatcher)
+        self.pos_monitor    = PositionMonitor(self.dispatcher, self.pose_cache)
 
         # ── Memory (persistent state) ────────────────────────────────────────
         self.mission_mem    = MissionMemory()
@@ -293,6 +367,7 @@ class DroneAI:
                 logger.info("=" * 60)
                 logger.info("  RayeedAI — DroneAI started")
                 logger.info(f"  Backend : {BACKEND.upper()}")
+                logger.info(f"  Vision  : {'OAK-D Lite' if self.oak_pipeline and self.oak_pipeline.available else 'disabled'}")
                 logger.info(f"  State   : {self.sm.state.value}")
                 logger.info("  Speak to RayeedAI. Press Ctrl+C to exit.")
                 logger.info("=" * 60)
@@ -317,6 +392,8 @@ class DroneAI:
                 task.cancel()
             await asyncio.gather(*background_tasks, return_exceptions=True)
             self.pya.terminate()
+            if self.oak_pipeline is not None:
+                self.oak_pipeline.stop()
             logger.info("[SESSION] Terminated.")
 
 

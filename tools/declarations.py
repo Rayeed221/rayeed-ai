@@ -170,4 +170,45 @@ FUNCTION_DECLARATIONS = [
             required=["seconds"],
         ),
     ),
+    # ── Vision (OAK-D Lite stereo camera) ────────────────────────────────────
+    types.FunctionDeclaration(
+        name="vision_obstacle_check",
+        description=(
+            "Scan for obstacles using the OAK-D Lite stereo depth camera. "
+            "Divides the field of view into 5 horizontal sectors (left, center_left, "
+            "center, center_right, right) and returns the distance to the nearest "
+            "object in each sector. Reports the nearest obstacle and whether the path "
+            "is clear. No neural network required — runs directly on stereo depth."
+        ),
+        parameters=types.Schema(type=types.Type.OBJECT, properties={}, required=[]),
+    ),
+    types.FunctionDeclaration(
+        name="vision_depth_snapshot",
+        description=(
+            "Capture a stereo depth frame from the OAK-D Lite and analyse it. "
+            "Returns a 3×3 grid of per-cell depth statistics (mean distance, nearest "
+            "distance, coverage percentage) plus a landing zone assessment that checks "
+            "whether the ground directly below is flat enough to land safely."
+        ),
+        parameters=types.Schema(type=types.Type.OBJECT, properties={}, required=[]),
+    ),
+    types.FunctionDeclaration(
+        name="vision_detect_objects",
+        description=(
+            "Run on-device YOLO object detection on the OAK-D Lite Myriad X VPU. "
+            "Returns detected objects with their COCO class name, confidence score, "
+            "and 3D spatial coordinates (x, y, z in millimetres relative to camera). "
+            "Requires the YOLO blob to be pre-loaded at startup."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "min_confidence": types.Schema(
+                    type=types.Type.NUMBER,
+                    description="Minimum confidence threshold 0.0–1.0 (default 0.5)",
+                ),
+            },
+            required=[],
+        ),
+    ),
 ]
