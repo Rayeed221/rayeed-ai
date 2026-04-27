@@ -32,8 +32,21 @@ pytest tests/test_failures.py -v
 
 The system is a **five-layer pipeline**:
 
-```
-Voice Input → Gemini Live API → Planner → Tool Dispatcher → Drone Adapter
+```mermaid
+graph LR
+    A["🎤 Voice Input"] -->|PCM Audio| B["🤖 Gemini Live API"]
+    B -->|Parsed Intent| C["📋 Planner"]
+    C -->|Decision: CONTINUE/WAIT/RETRY/REPLAN/ABORT/FAILSAFE| D["⚡ Tool Dispatcher"]
+    D -->|Execute Tool| E["🚁 Drone Adapter"]
+    E -->|Telemetry| F["📊 State Machine"]
+    F -.->|State Update| D
+    
+    style A fill:#1a1a1a,stroke:#FFD700,stroke-width:3px,color:#FFD700
+    style B fill:#1a1a1a,stroke:#00FF00,stroke-width:3px,color:#00FF00
+    style C fill:#1a1a1a,stroke:#00FFFF,stroke-width:3px,color:#00FFFF
+    style D fill:#1a1a1a,stroke:#FF6B6B,stroke-width:3px,color:#FF6B6B
+    style E fill:#1a1a1a,stroke:#9D4EDD,stroke-width:3px,color:#9D4EDD
+    style F fill:#1a1a1a,stroke:#00D9FF,stroke-width:3px,color:#00D9FF
 ```
 
 ### Layer Responsibilities
@@ -47,6 +60,65 @@ Voice Input → Gemini Live API → Planner → Tool Dispatcher → Drone Adapte
 4. **Safe Execution** (`tool_dispatcher.py` + `safety_policy.py` + `state_machine.py`) — 7-step pipeline: registry check → safety pre-check → execute (10s timeout) → state transition → update monitors → reset retry counter → return `ToolResponse`. Safety gates block operations on low battery, stale telemetry, altitude/speed violations, or exceeded retry counts.
 
 5. **Drone Backend** (`adapters/`) — Swappable via `DRONE_BACKEND` env var. `SimAdapter` (default) simulates all operations in memory. `MAVLinkAdapter` connects to real hardware.
+
+#### Layer Interaction Diagram
+
+```mermaid
+graph TB
+    subgraph AudioLayer["🎤 Layer 1: Audio Interface"]
+        A1["Mic Capture<br/>PCM Stream"]
+        A2["Turn Manager<br/>Mute/Unmute"]
+        A3["Speaker<br/>Playback"]
+    end
+    
+    subgraph LLMLayer["🤖 Layer 2: LLM Orchestration"]
+        L1["Gemini Live<br/>Session"]
+        L2["System Prompt<br/>Bangla"]
+        L3["Function<br/>Declarations"]
+        L4["Receive Loop<br/>Resilient"]
+    end
+    
+    subgraph PlannerLayer["📋 Layer 3: Mission Planning"]
+        P1["Decision Engine<br/>6 Outcomes"]
+        P2["Workflows<br/>Replan Logic"]
+        P3["Non-blocking<br/>Waits"]
+    end
+    
+    subgraph DispatcherLayer["⚡ Layer 4: Safe Execution"]
+        D1["Tool Registry"]
+        D2["Safety Policy"]
+        D3["State Machine"]
+        D4["7-Step Pipeline"]
+    end
+    
+    subgraph AdapterLayer["🚁 Layer 5: Drone Backend"]
+        DR1["SimAdapter<br/>Memory Sim"]
+        DR2["MAVLinkAdapter<br/>Hardware"]
+    end
+    
+    A1 --> L1
+    L1 --> L2
+    L2 --> L3
+    L3 --> L4
+    L4 --> P1
+    P1 --> P2
+    P2 --> P3
+    P3 --> D1
+    D1 --> D2
+    D2 --> D3
+    D3 --> D4
+    D4 --> DR1
+    D4 --> DR2
+    DR1 --> A2
+    DR2 --> A2
+    A2 --> A3
+    
+    style AudioLayer fill:#1a1a1a,stroke:#FFD700,stroke-width:2px,color:#FFD700
+    style LLMLayer fill:#1a1a1a,stroke:#00FF00,stroke-width:2px,color:#00FF00
+    style PlannerLayer fill:#1a1a1a,stroke:#00FFFF,stroke-width:2px,color:#00FFFF
+    style DispatcherLayer fill:#1a1a1a,stroke:#FF6B6B,stroke-width:2px,color:#FF6B6B
+    style AdapterLayer fill:#1a1a1a,stroke:#9D4EDD,stroke-width:2px,color:#9D4EDD
+```
 
 ### Key Files
 
@@ -64,6 +136,39 @@ Voice Input → Gemini Live API → Planner → Tool Dispatcher → Drone Adapte
 ### Tool Execution Flow
 
 Every drone command goes through `tool_dispatcher.py`:
+
+```mermaid
+graph TD
+    A["📥 Incoming Tool Request"] --> B["🔍 Step 1: Registry Check<br/>Tool exists?"]
+    B -->|Not Found| Z["❌ Return Error"]
+    B -->|Found| C["⚠️ Step 2: Safety Pre-Check<br/>Battery ≥15%?<br/>Telemetry Fresh &lt;5s?<br/>Altitude &lt;120m?<br/>Speed &lt;15 m/s?<br/>Retries &lt;3?"]
+    C -->|Unsafe| Z
+    C -->|Safe| D["⚡ Step 3: Execute<br/>Adapter.execute 10s timeout"]
+    D -->|Timeout/Error| E{"Retryable?"}
+    E -->|Yes| F["🔄 Retry<br/>Increment Counter"]
+    F --> D
+    E -->|No| Z
+    D -->|Success| G["🔗 Step 4: State Transition<br/>Update state_machine"]
+    G --> H["📊 Step 5: Update Monitors<br/>Safety monitors"]
+    H --> I["🔄 Step 6: Reset Retry<br/>Clear retry counter"]
+    I --> J["📦 Step 7: Return<br/>ToolResponse OK"]
+    J --> K["✅ Response to Planner"]
+    Z --> K
+    
+    style A fill:#1a1a1a,stroke:#FFD700,stroke-width:2px,color:#FFD700
+    style B fill:#1a1a1a,stroke:#00FFFF,stroke-width:2px,color:#00FFFF
+    style C fill:#1a1a1a,stroke:#FF6B6B,stroke-width:2px,color:#FF6B6B
+    style D fill:#1a1a1a,stroke:#9D4EDD,stroke-width:2px,color:#9D4EDD
+    style E fill:#1a1a1a,stroke:#FFB347,stroke-width:2px,color:#FFB347
+    style F fill:#1a1a1a,stroke:#FF1493,stroke-width:2px,color:#FF1493
+    style G fill:#1a1a1a,stroke:#00FF00,stroke-width:2px,color:#00FF00
+    style H fill:#1a1a1a,stroke:#00D9FF,stroke-width:2px,color:#00D9FF
+    style I fill:#1a1a1a,stroke:#00FF00,stroke-width:2px,color:#00FF00
+    style J fill:#1a1a1a,stroke:#00FF00,stroke-width:2px,color:#00FF00
+    style K fill:#1a1a1a,stroke:#FFD700,stroke-width:2px,color:#FFD700
+    style Z fill:#1a1a1a,stroke:#FF0000,stroke-width:3px,color:#FF0000
+```
+
 1. Registry check (tool exists?)
 2. Safety pre-check (battery ≥15%, telemetry fresh <5s, altitude <120m, speed <15 m/s, retries <3)
 3. Execute via adapter (10s timeout)
@@ -78,9 +183,73 @@ Every drone command goes through `tool_dispatcher.py`:
 - Tools declare which states they are valid in (e.g., `takeoff` only in `ARMED`)
 - `is_airborne()` covers TAKEOFF, ENROUTE, HOVER, LANDING, RTL
 
+#### Mission State Flow
+
+```mermaid
+stateDiagram-v2
+    [*] --> IDLE
+    IDLE --> CONNECTED: connect_drone()
+    CONNECTED --> ARMED: arm_drone()
+    ARMED --> TAKEOFF: takeoff()
+    TAKEOFF --> ENROUTE: goto_position()
+    ENROUTE --> HOVER: hover_at_position()
+    HOVER --> ENROUTE: goto_position()
+    HOVER --> LANDING: land()
+    LANDING --> IDLE: motor_stop()
+    
+    ARMED --> RTL: return_to_launch()
+    ENROUTE --> RTL: return_to_launch()
+    HOVER --> RTL: return_to_launch()
+    
+    IDLE --> FAILSAFE: force_failsafe()
+    CONNECTED --> FAILSAFE: force_failsafe()
+    ARMED --> FAILSAFE: force_failsafe()
+    TAKEOFF --> FAILSAFE: force_failsafe()
+    ENROUTE --> FAILSAFE: force_failsafe()
+    HOVER --> FAILSAFE: force_failsafe()
+    RTL --> FAILSAFE: force_failsafe()
+    LANDING --> FAILSAFE: force_failsafe()
+    
+    RTL --> IDLE: landing_complete()
+    FAILSAFE --> IDLE: disarm_drone()
+    
+    style IDLE fill:#1a1a1a,stroke:#FFD700,stroke-width:2px,color:#FFD700
+    style CONNECTED fill:#1a1a1a,stroke:#00FF00,stroke-width:2px,color:#00FF00
+    style ARMED fill:#1a1a1a,stroke:#00FFFF,stroke-width:2px,color:#00FFFF
+    style TAKEOFF fill:#1a1a1a,stroke:#FF6B6B,stroke-width:2px,color:#FF6B6B
+    style ENROUTE fill:#1a1a1a,stroke:#9D4EDD,stroke-width:2px,color:#9D4EDD
+    style HOVER fill:#1a1a1a,stroke:#00D9FF,stroke-width:2px,color:#00D9FF
+    style LANDING fill:#1a1a1a,stroke:#FFB347,stroke-width:2px,color:#FFB347
+    style RTL fill:#1a1a1a,stroke:#FF1493,stroke-width:2px,color:#FF1493
+    style FAILSAFE fill:#1a1a1a,stroke:#FF0000,stroke-width:3px,color:#FF0000
+```
+
 ### Backend Abstraction
 
 Both adapters implement the same interface from `adapters/base_adapter.py`. Switching between sim and MAVLink requires only an env var change — no code changes.
+
+```mermaid
+graph LR
+    A["⚡ Tool Dispatcher<br/>asyncio.to_thread"] --> B["🔧 Base Adapter<br/>Interface"]
+    B --> C{"DRONE_BACKEND<br/>env var"}
+    C -->|sim| D["🖥️ SimAdapter<br/>Memory Simulation<br/>Default"]
+    C -->|mavlink| E["🚁 MAVLinkAdapter<br/>Real Hardware<br/>pymavlink"]
+    D --> F["18 Handler Methods<br/>execute"]
+    E --> G["18 Handler Methods<br/>execute"]
+    F --> H["ToolResponse<br/>Normalized"]
+    G --> H
+    H --> I["Back to Dispatcher"]
+    
+    style A fill:#1a1a1a,stroke:#FFD700,stroke-width:2px,color:#FFD700
+    style B fill:#1a1a1a,stroke:#00FF00,stroke-width:2px,color:#00FF00
+    style C fill:#1a1a1a,stroke:#FFB347,stroke-width:2px,color:#FFB347
+    style D fill:#1a1a1a,stroke:#00FFFF,stroke-width:2px,color:#00FFFF
+    style E fill:#1a1a1a,stroke:#FF6B6B,stroke-width:2px,color:#FF6B6B
+    style F fill:#1a1a1a,stroke:#00FFFF,stroke-width:2px,color:#00FFFF
+    style G fill:#1a1a1a,stroke:#FF6B6B,stroke-width:2px,color:#FF6B6B
+    style H fill:#1a1a1a,stroke:#9D4EDD,stroke-width:2px,color:#9D4EDD
+    style I fill:#1a1a1a,stroke:#FFD700,stroke-width:2px,color:#FFD700
+```
 
 ## MAVLink Adapter Implementation
 
