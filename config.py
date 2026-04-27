@@ -12,8 +12,10 @@ CHANNELS            = 1
 
 # ─── Backend ────────────────────────────────────────────────────────────────
 # Options: "sim" | "mavlink"
-BACKEND     = os.environ.get("DRONE_BACKEND", "sim")
-MAVLINK_URI = os.environ.get("MAVLINK_URI", "udp:127.0.0.1:14550")
+# BACKEND     = os.environ.get("DRONE_BACKEND", "sim")
+BACKEND     = os.environ.get("DRONE_BACKEND", "mavlink")
+
+MAVLINK_URI = os.environ.get("MAVLINK_URI", "tcp:127.0.0.1:5762")
 
 # ─── Safety Thresholds ──────────────────────────────────────────────────────
 BATTERY_CRITICAL_PCT  = 15        # % → trigger emergency
