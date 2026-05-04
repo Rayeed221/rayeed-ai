@@ -14,6 +14,7 @@ Dispatcher flow (Decision 4 — Planner has override authority):
 
 import asyncio
 import logging
+import re
 from typing import Optional
 
 from schemas import ToolResponse, WaitInstruction
@@ -102,7 +103,7 @@ class ToolDispatcher:
             emergency_triggers = {"BATTERY_CRITICAL", "TELEMETRY_EMERGENCY", "MAX_RETRIES"}
             return ToolResponse.failure(
                 tool=tool_name, state=current_state.value,
-                error=err.message,
+                error=f"{err.code}: {err.message}",
                 next_action="emergency" if err.code in emergency_triggers else "retry" if err.retryable else None,
                 confidence=0.0,
             )
@@ -152,6 +153,11 @@ class ToolDispatcher:
             self._safety.update_battery(result["level_percent"])
         if tool_name == "get_telemetry" and "altitude" in result:
             self._safety.update_altitude(result["altitude"])
+        if tool_name in ("connect_drone", "get_position_str") and "position" in result:
+            if self._safety._home_lat is None:
+                m = re.search(r"Lat:\s*([-\d.]+),\s*Lon:\s*([-\d.]+)", result["position"])
+                if m:
+                    self._safety.set_home(float(m.group(1)), float(m.group(2)))
 
         # ── 6. Reset retry counter on success ─────────────────────────────────
         self._safety.reset_retry(tool_name)

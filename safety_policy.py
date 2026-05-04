@@ -1,3 +1,4 @@
+import math
 import time
 import logging
 
@@ -6,6 +7,7 @@ from config import (
     ALTITUDE_CEILING_M, MAX_SPEED_MS,
     TELEMETRY_STALE_SEC, EMERGENCY_STALE_SEC,
     MAX_RETRY_COUNT,
+    GEOFENCE_ENABLED, GEOFENCE_MAX_RADIUS_M,
 )
 from schemas import ErrorSchema
 
@@ -25,6 +27,9 @@ class SafetyPolicy:
         self._last_tel_time:   float = 0.0
         self._last_battery:    float = 100.0
         self._last_altitude:   float = 0.0
+        self._home_lat:        float | None = None
+        self._home_lon:        float | None = None
+        self._env_memory                    = None
 
     # ── Live value updates ────────────────────────────────────────────────────
 
@@ -36,6 +41,14 @@ class SafetyPolicy:
 
     def update_altitude(self, alt_m: float):
         self._last_altitude = alt_m
+
+    def set_home(self, lat: float, lon: float):
+        self._home_lat = lat
+        self._home_lon = lon
+        logger.info(f"[SAFETY] Home position set: ({lat:.6f}, {lon:.6f})")
+
+    def set_environment_memory(self, env_memory):
+        self._env_memory = env_memory
 
     # ── Individual checks ─────────────────────────────────────────────────────
 
@@ -122,6 +135,59 @@ class SafetyPolicy:
             )
         return None
 
+    @staticmethod
+    def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        R = 6_371_000.0
+        phi1, phi2 = math.radians(lat1), math.radians(lat2)
+        dphi = math.radians(lat2 - lat1)
+        dlam = math.radians(lon2 - lon1)
+        a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
+        return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+    def check_geofence(self, target_lat: float, target_lon: float) -> ErrorSchema | None:
+        if not GEOFENCE_ENABLED or self._home_lat is None:
+            return None
+
+        dist = self._haversine_m(self._home_lat, self._home_lon, target_lat, target_lon)
+        if dist > GEOFENCE_MAX_RADIUS_M:
+            return ErrorSchema(
+                code="GEOFENCE_BREACH",
+                message=(
+                    f"Target ({target_lat:.6f}, {target_lon:.6f}) is {dist:.1f}m from home "
+                    f"— exceeds geofence radius {GEOFENCE_MAX_RADIUS_M}m"
+                ),
+                retryable=False,
+                context={
+                    "target_lat": target_lat,
+                    "target_lon": target_lon,
+                    "distance_m": round(dist, 1),
+                    "max_radius_m": GEOFENCE_MAX_RADIUS_M,
+                },
+            )
+
+        if self._env_memory is not None:
+            for zone in self._env_memory.no_fly_zones():
+                zone_dist = self._haversine_m(
+                    zone["lat"], zone["lon"], target_lat, target_lon
+                )
+                if zone_dist <= zone["radius_m"]:
+                    return ErrorSchema(
+                        code="NO_FLY_ZONE",
+                        message=(
+                            f"Target is {zone_dist:.1f}m from no-fly zone "
+                            f"'{zone.get('label', 'unnamed')}' (radius {zone['radius_m']}m)"
+                        ),
+                        retryable=False,
+                        context={
+                            "zone_label": zone.get("label", ""),
+                            "zone_lat": zone["lat"],
+                            "zone_lon": zone["lon"],
+                            "zone_radius_m": zone["radius_m"],
+                            "distance_m": round(zone_dist, 1),
+                        },
+                    )
+        return None
+
     # ── Retry management ──────────────────────────────────────────────────────
 
     def increment_retry(self, tool: str) -> int:
@@ -170,6 +236,11 @@ class SafetyPolicy:
 
         if tool_name == "set_speed":
             err = self.check_speed(args.get("speed_ms", 0))
+            if err:
+                return err
+
+        if tool_name == "goto_position":
+            err = self.check_geofence(args.get("lat", 0.0), args.get("lon", 0.0))
             if err:
                 return err
 

@@ -1,7 +1,12 @@
 import os
 
 # ─── API ────────────────────────────────────────────────────────────────────
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyCCIKOChwt4ywQPOdTf1iRbrh_547Ir1Mo")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+if not GEMINI_API_KEY:
+    raise EnvironmentError(
+        "GEMINI_API_KEY environment variable is not set. "
+        "Export it before starting: export GEMINI_API_KEY=your_key"
+    )
 MODEL = "models/gemini-3.1-flash-live-preview"
 
 # ─── Audio ──────────────────────────────────────────────────────────────────
@@ -12,8 +17,7 @@ CHANNELS            = 1
 
 # ─── Backend ────────────────────────────────────────────────────────────────
 # Options: "sim" | "mavlink"
-# BACKEND     = os.environ.get("DRONE_BACKEND", "sim")
-BACKEND     = os.environ.get("DRONE_BACKEND", "mavlink")
+BACKEND     = os.environ.get("DRONE_BACKEND", "sim")
 
 MAVLINK_URI = os.environ.get("MAVLINK_URI", "tcp:127.0.0.1:5762")
 
@@ -25,6 +29,10 @@ MAX_SPEED_MS          = 15.0      # m/s — hard limit
 TELEMETRY_STALE_SEC   = 5.0       # seconds → planner wait
 EMERGENCY_STALE_SEC   = 10.0      # seconds → failsafe
 MAX_RETRY_COUNT       = 3         # before abort
+
+# ─── Geofence ───────────────────────────────────────────────────────────────
+GEOFENCE_ENABLED      = os.environ.get("GEOFENCE_ENABLED", "1") == "1"
+GEOFENCE_MAX_RADIUS_M = float(os.environ.get("GEOFENCE_MAX_RADIUS_M", "500"))
 
 # ─── Planner ────────────────────────────────────────────────────────────────
 WAIT_POLL_INTERVAL   = 0.2        # seconds between wait checks

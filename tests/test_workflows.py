@@ -1,6 +1,6 @@
 import pytest
 import asyncio
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from schemas import ToolResponse, WaitInstruction
 from state_machine import StateMachine, MissionState
@@ -10,8 +10,8 @@ from planner import Planner
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def ok(tool, state="connected", next_action=None, wait=None):
-    return ToolResponse.success(tool=tool, state=state, next_action=next_action, wait=wait)
+def ok(tool, state="connected", next_action=None, wait=None, data=None):
+    return ToolResponse.success(tool=tool, state=state, next_action=next_action, wait=wait, data=data or {})
 
 def fail(tool, state="idle", error="MOCK_ERROR", next_action=None):
     return ToolResponse.failure(tool=tool, state=state, error=error, next_action=next_action)
@@ -162,3 +162,72 @@ async def test_emergency_handles_dispatch_failure(dispatcher, sm, safety, planne
     dispatcher.dispatch.side_effect = Exception("link lost")
     result = await run_emergency(dispatcher, sm, safety, planner, reason="link lost")
     assert result is True  # emergency always completes — never raises
+
+
+# ── Landing ───────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_landing_success(dispatcher, sm, safety, planner):
+    from workflows.landing import run_landing
+    dispatcher.dispatch.side_effect = [
+        ok("land", state="landing"),
+        ok("disarm_drone", state="idle"),
+    ]
+    with patch("workflows.landing.asyncio.sleep", new_callable=AsyncMock):
+        result = await run_landing(dispatcher, sm, safety, planner)
+    assert result is True
+    assert dispatcher.dispatch.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_landing_land_fails(dispatcher, sm, safety, planner):
+    from workflows.landing import run_landing
+    dispatcher.dispatch.return_value = fail("land", error="ILLEGAL_COMMAND")
+    with patch("workflows.landing.asyncio.sleep", new_callable=AsyncMock):
+        result = await run_landing(dispatcher, sm, safety, planner)
+    assert result is False
+    assert dispatcher.dispatch.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_landing_disarm_failure_still_returns_true(dispatcher, sm, safety, planner):
+    from workflows.landing import run_landing
+    dispatcher.dispatch.side_effect = [
+        ok("land", state="landing"),
+        fail("disarm_drone", error="already disarmed"),
+    ]
+    with patch("workflows.landing.asyncio.sleep", new_callable=AsyncMock):
+        result = await run_landing(dispatcher, sm, safety, planner)
+    assert result is True  # disarm failure is non-fatal per workflow
+
+
+# ── Inspection ────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_inspection_success_no_yaw(dispatcher, sm, safety, planner):
+    from workflows.inspection import run_inspection
+    dispatcher.dispatch.side_effect = [
+        ok("wait_time",       state="hover"),
+        ok("get_position_str", state="hover", data={"position": "Lat: 23.81, Lon: 90.41, Alt: 10.0m"}),
+        ok("get_telemetry",   state="hover"),
+    ]
+    result = await run_inspection(dispatcher, sm, safety, planner, hold_seconds=0.0)
+    assert result is True
+    assert dispatcher.dispatch.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_inspection_success_with_yaw(dispatcher, sm, safety, planner):
+    from workflows.inspection import run_inspection
+    dispatcher.dispatch.side_effect = [
+        ok("wait_time",        state="hover"),
+        ok("set_yaw",          state="hover", data={"yaw_deg": 90.0}),
+        ok("get_position_str", state="hover", data={"position": "Lat: 23.81, Lon: 90.41, Alt: 10.0m"}),
+        ok("get_telemetry",    state="hover"),
+    ]
+    result = await run_inspection(
+        dispatcher, sm, safety, planner,
+        hold_seconds=0.0, yaw_deg=90.0,
+    )
+    assert result is True
+    assert dispatcher.dispatch.call_count == 4

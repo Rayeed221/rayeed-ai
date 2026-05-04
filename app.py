@@ -19,7 +19,9 @@ Run (real drone):
 
 import asyncio
 import logging
+import signal
 import traceback
+from logging.handlers import RotatingFileHandler
 
 import pyaudio
 from google import genai
@@ -34,7 +36,7 @@ from config import (
     VISION_CAMERA_PITCH_DEG, VISION_CAMERA_YAW_DEG, VISION_CAMERA_HFOV_DEG,
 )
 from schemas import ToolResponse
-from state_machine import StateMachine
+from state_machine import StateMachine, MissionState
 from safety_policy import SafetyPolicy
 from tool_dispatcher import ToolDispatcher
 from planner import Planner, PlanDecision
@@ -52,6 +54,12 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
+_file_handler = RotatingFileHandler(
+    "droneai.log", maxBytes=10 * 1024 * 1024, backupCount=5
+)
+_file_handler.setLevel(logging.INFO)
+_file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+logging.getLogger().addHandler(_file_handler)
 logger = logging.getLogger("DroneAI")
 
 
@@ -162,8 +170,9 @@ LIVE_CONFIG = types.LiveConnectConfig(
 
 class DroneAI:
     def __init__(self):
-        self.pya            = pyaudio.PyAudio()
-        self.session        = None
+        self.pya              = pyaudio.PyAudio()
+        self.session          = None
+        self._shutdown_event  = asyncio.Event()
 
         # Queues
         self.audio_in_queue = asyncio.Queue()   # AI audio → speaker
@@ -208,6 +217,37 @@ class DroneAI:
         # ── Memory (persistent state) ────────────────────────────────────────
         self.mission_mem    = MissionMemory()
         self.env_mem        = EnvironmentMemory()
+        self.safety.set_environment_memory(self.env_mem)
+
+    # ── Graceful shutdown on SIGINT / SIGTERM ────────────────────────────────────
+
+    def _handle_signal(self, signum, loop):
+        logger.warning(f"[SHUTDOWN] Signal {signum} received — requesting graceful shutdown")
+        loop.call_soon_threadsafe(self._shutdown_event.set)
+
+    async def _shutdown_watchdog(self):
+        """Wait for shutdown signal, disarm/emergency if needed, then cancel all tasks."""
+        await self._shutdown_event.wait()
+        logger.warning("[SHUTDOWN] Initiating graceful shutdown sequence")
+        try:
+            if self.sm.is_airborne():
+                logger.critical("[SHUTDOWN] Drone is airborne — running emergency workflow")
+                from workflows.emergency import run_emergency
+                await run_emergency(
+                    self.dispatcher, self.sm, self.safety, self.planner,
+                    reason="process shutdown signal",
+                )
+            elif self.sm.state == MissionState.ARMED:
+                logger.warning("[SHUTDOWN] Drone is armed on ground — disarming")
+                await self.dispatcher.dispatch("disarm_drone", {})
+        except Exception as exc:
+            logger.error(f"[SHUTDOWN] Error during shutdown cleanup: {exc}")
+        finally:
+            # Cancel all other running tasks to stop the session TaskGroup
+            current = asyncio.current_task()
+            for task in asyncio.all_tasks():
+                if task is not current:
+                    task.cancel()
 
     # ── Send mic PCM to Gemini ─────────────────────────────────────────────────
 
@@ -251,9 +291,15 @@ class DroneAI:
     async def receive_responses(self):
         """
         Resilient receive loop — a single tool response failure no longer
-        kills the task. The loop restarts after each recoverable exception,
-        keeping mic, playback, and telemetry tasks alive.
+        kills the task. The loop restarts after each recoverable exception
+        with exponential backoff. After _MAX_RESTARTS consecutive failures,
+        the planner's failsafe is triggered and the loop exits.
         """
+        _MAX_RESTARTS = 5
+        _BASE_DELAY   = 0.5
+        _MAX_DELAY    = 30.0
+        restart_count = 0
+
         while True:
             if not self.session:
                 await asyncio.sleep(0.05)
@@ -329,14 +375,27 @@ class DroneAI:
                             self.audio_in_queue.get_nowait()
                         logger.info("[TURN] Complete — mic unblocked")
 
+                    restart_count = 0  # successful iteration resets the counter
+
             except asyncio.CancelledError:
                 # Propagate shutdown — do not restart
                 raise
             except Exception as exc:
-                # Any other exception (AttributeError, connection drop, etc.)
-                # is logged and the loop restarts — audio tasks keep running
-                logger.error(f"[RECEIVE] Recoverable error: {exc} — restarting receive loop")
-                await asyncio.sleep(0.5)
+                restart_count += 1
+                delay = min(_BASE_DELAY * (2 ** (restart_count - 1)), _MAX_DELAY)
+                logger.error(
+                    f"[RECEIVE] Recoverable error (restart {restart_count}/{_MAX_RESTARTS}): "
+                    f"{exc} — backing off {delay:.1f}s"
+                )
+                if restart_count >= _MAX_RESTARTS:
+                    logger.critical(
+                        f"[RECEIVE] Max restarts ({_MAX_RESTARTS}) reached — triggering failsafe"
+                    )
+                    await self.planner.trigger_failsafe(
+                        reason=f"receive_responses exceeded {_MAX_RESTARTS} restarts: {exc}"
+                    )
+                    return
+                await asyncio.sleep(delay)
 
     # ── Main run loop ──────────────────────────────────────────────────────────
 
@@ -353,6 +412,10 @@ class DroneAI:
             cleanly on shutdown — a background crash does NOT kill audio.
         """
         loop = asyncio.get_event_loop()
+
+        # ── Register signal handlers for graceful shutdown ─────────────────
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, self._handle_signal, sig, loop)
 
         # ── Background tasks started before session opens ──────────────────
         background_tasks = [
@@ -378,6 +441,7 @@ class DroneAI:
                     tg.create_task(self.send_audio(),                        name="send_audio")
                     tg.create_task(self.receive_responses(),                  name="receive_responses")
                     tg.create_task(self.playback.run(self.turn_manager),     name="playback")
+                    tg.create_task(self._shutdown_watchdog(),                 name="shutdown_watchdog")
 
         except asyncio.CancelledError:
             logger.info("[SESSION] Shutting down...")
