@@ -1,0 +1,1070 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RayeedAI — Architecture Diagram</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --surface2: #1c2230; --border: #30363d;
+    --accent: #58a6ff; --green: #3fb950; --red: #f85149; --yellow: #d29922;
+    --purple: #bc8cff; --orange: #ff9500; --teal: #39d353; --pink: #ff7eb3;
+    --text: #e6edf3; --muted: #8b949e;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; line-height: 1.5; }
+
+  header { background: linear-gradient(135deg, #1a2332 0%, #0d1117 100%); border-bottom: 1px solid var(--border); padding: 24px 32px; display: flex; align-items: center; gap: 20px; }
+  header h1 { font-size: 26px; font-weight: 700; color: var(--accent); letter-spacing: -0.5px; }
+  header p { color: var(--muted); font-size: 14px; margin-top: 4px; }
+  .badge { background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; padding: 3px 10px; font-size: 11px; color: var(--muted); }
+
+  nav { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 32px; display: flex; gap: 4px; overflow-x: auto; }
+  nav a { color: var(--muted); text-decoration: none; padding: 12px 14px; font-size: 13px; border-bottom: 2px solid transparent; white-space: nowrap; transition: color .2s, border-color .2s; }
+  nav a:hover, nav a.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  main { padding: 28px 32px; max-width: 1600px; margin: 0 auto; }
+  section { display: none; }
+  section.active { display: block; }
+
+  h2 { font-size: 18px; font-weight: 700; color: var(--text); margin-bottom: 18px; display: flex; align-items: center; gap: 10px; }
+  h2 .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  h3 { font-size: 14px; font-weight: 600; color: var(--accent); margin-bottom: 10px; }
+
+  .grid { display: grid; gap: 16px; }
+  .grid-2 { grid-template-columns: repeat(2, 1fr); }
+  .grid-3 { grid-template-columns: repeat(3, 1fr); }
+  .grid-4 { grid-template-columns: repeat(4, 1fr); }
+  .grid-5 { grid-template-columns: repeat(5, 1fr); }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .card.accent-blue { border-left: 3px solid var(--accent); }
+  .card.accent-green { border-left: 3px solid var(--green); }
+  .card.accent-red { border-left: 3px solid var(--red); }
+  .card.accent-yellow { border-left: 3px solid var(--yellow); }
+  .card.accent-purple { border-left: 3px solid var(--purple); }
+  .card.accent-orange { border-left: 3px solid var(--orange); }
+  .card.accent-teal { border-left: 3px solid var(--teal); }
+  .card.accent-pink { border-left: 3px solid var(--pink); }
+
+  .file-tag { background: var(--surface2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 7px; font-size: 11px; color: var(--teal); font-family: monospace; }
+  .method { padding: 4px 0; border-bottom: 1px solid #21262d; display: flex; gap: 8px; align-items: flex-start; }
+  .method:last-child { border-bottom: none; }
+  .method .name { color: var(--yellow); font-family: monospace; font-size: 12px; min-width: 170px; }
+  .method .desc { color: var(--muted); font-size: 12px; }
+  .const { padding: 3px 0; }
+  .const .name { color: var(--purple); font-family: monospace; font-size: 12px; }
+
+  .pipeline { display: flex; align-items: stretch; gap: 0; margin: 16px 0; }
+  .pipe-step { flex: 1; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 12px; position: relative; }
+  .pipe-step + .pipe-step { margin-left: 28px; }
+  .pipe-step + .pipe-step::before { content: '→'; position: absolute; left: -20px; top: 50%; transform: translateY(-50%); color: var(--accent); font-size: 16px; font-weight: bold; }
+  .pipe-step .num { font-size: 20px; font-weight: 800; color: var(--border); margin-bottom: 4px; }
+  .pipe-step .title { font-size: 12px; font-weight: 700; color: var(--text); }
+  .pipe-step .sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .pipe-step.ok { border-color: var(--green); }
+  .pipe-step.warn { border-color: var(--yellow); }
+  .pipe-step.danger { border-color: var(--red); }
+
+  .state-diagram { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: flex-start; margin: 16px 0; }
+  .state-node { background: var(--surface2); border: 2px solid var(--border); border-radius: 8px; padding: 10px 14px; text-align: center; font-size: 12px; font-weight: 700; min-width: 90px; }
+  .state-node.start { border-color: var(--accent); color: var(--accent); }
+  .state-node.fly { border-color: var(--green); color: var(--green); }
+  .state-node.danger { border-color: var(--red); color: var(--red); }
+  .state-arrow { color: var(--muted); font-size: 18px; font-weight: bold; }
+
+  .tool-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+  .tool-chip { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; }
+  .tool-chip .tname { font-family: monospace; font-size: 11px; color: var(--yellow); }
+  .tool-chip .tperm { font-size: 10px; margin-top: 2px; }
+  .tool-chip .tperm.read { color: var(--teal); }
+  .tool-chip .tperm.write { color: var(--orange); }
+  .tool-chip .tperm.critical { color: var(--red); }
+
+  .flow-box { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; }
+  .flow-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid #21262d; }
+  .flow-row:last-child { border-bottom: none; }
+  .flow-from { min-width: 130px; font-family: monospace; font-size: 12px; color: var(--accent); }
+  .flow-arrow { color: var(--muted); }
+  .flow-to { font-family: monospace; font-size: 12px; color: var(--green); }
+  .flow-note { font-size: 11px; color: var(--muted); margin-left: auto; }
+
+  .decision { display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0; }
+  .dec-chip { border-radius: 6px; padding: 6px 14px; font-size: 12px; font-weight: 700; }
+
+  .test-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #21262d; }
+  .test-row:last-child { border-bottom: none; }
+  .test-count { background: var(--accent); color: var(--bg); border-radius: 10px; padding: 1px 8px; font-size: 11px; font-weight: 700; min-width: 36px; text-align: center; }
+
+  .threshold { display: flex; align-items: center; gap: 12px; padding: 7px 0; border-bottom: 1px solid #21262d; }
+  .threshold:last-child { border-bottom: none; }
+  .threshold .key { font-family: monospace; color: var(--purple); min-width: 200px; font-size: 12px; }
+  .threshold .val { color: var(--orange); font-weight: 700; font-size: 12px; }
+  .threshold .desc { color: var(--muted); font-size: 11px; }
+
+  .tag { display: inline-block; border-radius: 4px; padding: 1px 7px; font-size: 10px; font-weight: 700; text-transform: uppercase; }
+  .tag.async { background: #1a2c3a; color: var(--accent); }
+  .tag.sync { background: #1a2a1a; color: var(--green); }
+  .tag.bg { background: #2a1a2a; color: var(--purple); }
+
+  .arch-canvas { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 24px; }
+  .layer { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 12px; overflow: hidden; }
+  .layer-header { padding: 10px 16px; font-weight: 700; font-size: 13px; display: flex; align-items: center; gap: 10px; }
+  .layer-body { padding: 12px 16px; background: var(--surface2); display: flex; gap: 12px; flex-wrap: wrap; }
+  .layer-1 .layer-header { background: #1a2c3a; color: var(--accent); }
+  .layer-2 .layer-header { background: #1a2a1a; color: var(--green); }
+  .layer-3 .layer-header { background: #2a2a1a; color: var(--yellow); }
+  .layer-4 .layer-header { background: #2a1a1a; color: var(--red); }
+  .layer-5 .layer-header { background: #2a1a2a; color: var(--purple); }
+  .layer-6 .layer-header { background: #1a2a2a; color: var(--teal); }
+
+  .mini-card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; font-size: 12px; }
+  .mini-card strong { color: var(--text); display: block; margin-bottom: 3px; }
+  .mini-card span { color: var(--muted); font-size: 11px; }
+
+  .arrow-down { text-align: center; color: var(--accent); font-size: 22px; margin: 6px 0; }
+  code { background: var(--surface2); padding: 1px 5px; border-radius: 3px; font-family: monospace; font-size: 12px; color: var(--teal); }
+
+  @media (max-width: 900px) {
+    .grid-2, .grid-3, .grid-4, .grid-5 { grid-template-columns: 1fr; }
+    .pipeline { flex-direction: column; }
+    .pipe-step + .pipe-step { margin-left: 0; margin-top: 24px; }
+    .pipe-step + .pipe-step::before { content: '↓'; left: 50%; top: -18px; transform: translateX(-50%); }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>🚁 RayeedAI — রাইদ-এআই</h1>
+    <p>Voice-Controlled Autonomous Drone Assistant · Bangla NLP · Google Gemini Live API</p>
+  </div>
+  <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+    <span class="badge">Python Async</span>
+    <span class="badge">Google Gemini Live</span>
+    <span class="badge">MAVLink / Sim</span>
+    <span class="badge">OAK-D Lite Vision</span>
+    <span class="badge">253 Tests</span>
+  </div>
+</header>
+
+<nav>
+  <a href="#" class="active" onclick="show('overview',this)">Overview</a>
+  <a href="#" onclick="show('pipeline',this)">Pipeline</a>
+  <a href="#" onclick="show('audio',this)">Audio</a>
+  <a href="#" onclick="show('llm',this)">LLM / App</a>
+  <a href="#" onclick="show('planner',this)">Planner</a>
+  <a href="#" onclick="show('dispatcher',this)">Dispatcher</a>
+  <a href="#" onclick="show('statemachine',this)">State Machine</a>
+  <a href="#" onclick="show('safety',this)">Safety Policy</a>
+  <a href="#" onclick="show('tools',this)">Tool Registry</a>
+  <a href="#" onclick="show('adapters',this)">Adapters</a>
+  <a href="#" onclick="show('vision',this)">Vision</a>
+  <a href="#" onclick="show('localization',this)">Localization</a>
+  <a href="#" onclick="show('telemetry',this)">Telemetry</a>
+  <a href="#" onclick="show('memory',this)">Memory</a>
+  <a href="#" onclick="show('workflows',this)">Workflows</a>
+  <a href="#" onclick="show('schemas',this)">Schemas</a>
+  <a href="#" onclick="show('config',this)">Config</a>
+  <a href="#" onclick="show('tests',this)">Tests</a>
+</nav>
+
+<main>
+
+<!-- ═══════════════════════════════ OVERVIEW ═══════════════════════════════ -->
+<section id="overview" class="active">
+  <h2><span class="dot" style="background:var(--accent)"></span>System Overview</h2>
+
+  <div class="arch-canvas">
+    <!-- Voice Input -->
+    <div style="text-align:center;padding:12px;background:var(--surface2);border-radius:8px;border:1px solid var(--border);margin-bottom:8px">
+      <strong style="color:var(--accent);font-size:14px">🎙 Bangla Voice Input</strong>
+      <span style="color:var(--muted);margin-left:12px">PCM audio stream</span>
+    </div>
+    <div class="arrow-down">↓</div>
+
+    <!-- Layer 1 -->
+    <div class="layer layer-1">
+      <div class="layer-header">Layer 1 — Audio Interface <span class="file-tag">audio/</span></div>
+      <div class="layer-body">
+        <div class="mini-card"><strong>MicCapture</strong><span>PCM → mic_queue · blocks during AI speech</span></div>
+        <div class="mini-card"><strong>Playback</strong><span>audio_queue → speaker · calls unblock()</span></div>
+        <div class="mini-card"><strong>TurnManager</strong><span>block() / unblock() mic during AI turn</span></div>
+      </div>
+    </div>
+    <div class="arrow-down">↓ PCM stream</div>
+
+    <!-- Layer 2 -->
+    <div class="layer layer-2">
+      <div class="layer-header">Layer 2 — LLM Orchestration <span class="file-tag">app.py</span> <span class="file-tag">tools/declarations.py</span></div>
+      <div class="layer-body">
+        <div class="mini-card"><strong>DroneAI</strong><span>Session lifecycle, task isolation</span></div>
+        <div class="mini-card"><strong>Session Tasks</strong><span>send_audio · receive_responses · playback · mic</span></div>
+        <div class="mini-card"><strong>Background Tasks</strong><span>telemetry · battery · position monitors</span></div>
+        <div class="mini-card"><strong>Gemini Live API ☁</strong><span>Bangla NLP · function calling · 26 declarations</span></div>
+      </div>
+    </div>
+    <div class="arrow-down">↓ function_call + args</div>
+
+    <!-- Layer 3 -->
+    <div class="layer layer-3">
+      <div class="layer-header">Layer 3 — Mission Planner <span class="file-tag">planner.py</span> <span class="file-tag">workflows/</span></div>
+      <div class="layer-body">
+        <div class="mini-card"><strong>Planner.decide()</strong><span>Overrides LLM · 6 outcomes</span></div>
+        <div class="mini-card"><strong>CONTINUE</strong><span style="color:var(--green)">Execute next</span></div>
+        <div class="mini-card"><strong>WAIT</strong><span style="color:var(--yellow)">Non-blocking delay</span></div>
+        <div class="mini-card"><strong>RETRY</strong><span style="color:var(--orange)">Re-execute same tool</span></div>
+        <div class="mini-card"><strong>REPLAN</strong><span style="color:var(--purple)">Find alternate path</span></div>
+        <div class="mini-card"><strong>ABORT</strong><span style="color:var(--red)">Mission stop</span></div>
+        <div class="mini-card"><strong>FAILSAFE</strong><span style="color:var(--red)">Emergency RTL/land</span></div>
+      </div>
+    </div>
+    <div class="arrow-down">↓ approved action</div>
+
+    <!-- Layer 4 -->
+    <div class="layer layer-4">
+      <div class="layer-header">Layer 4 — Safe Execution <span class="file-tag">tool_dispatcher.py</span> <span class="file-tag">safety_policy.py</span> <span class="file-tag">state_machine.py</span></div>
+      <div class="layer-body">
+        <div class="mini-card"><strong>Registry Check</strong><span>Tool exists?</span></div>
+        <div class="mini-card"><strong>Safety Pre-check</strong><span>Battery · telemetry · altitude · speed · retries</span></div>
+        <div class="mini-card"><strong>Execute</strong><span>asyncio.to_thread · 10s timeout</span></div>
+        <div class="mini-card"><strong>State Transition</strong><span>state_machine.transition()</span></div>
+        <div class="mini-card"><strong>Update Monitors</strong><span>safety_policy updates</span></div>
+        <div class="mini-card"><strong>Retry Reset</strong><span>reset_retry() on success</span></div>
+        <div class="mini-card"><strong>ToolResponse</strong><span>Normalized envelope</span></div>
+      </div>
+    </div>
+    <div class="arrow-down">↓ adapter.execute()</div>
+
+    <!-- Layer 5 -->
+    <div class="layer layer-5">
+      <div class="layer-header">Layer 5 — Drone Backend <span class="file-tag">adapters/</span></div>
+      <div class="layer-body">
+        <div class="mini-card"><strong>SimAdapter</strong><span>In-memory simulation · default · no hardware</span></div>
+        <div class="mini-card"><strong>MAVLinkAdapter</strong><span>pymavlink · real ArduCopter hardware</span></div>
+        <div class="mini-card"><strong>BaseAdapter (ABC)</strong><span>execute() · is_connected() · disconnect()</span></div>
+        <div class="mini-card"><strong>18 handlers</strong><span>connect · arm · takeoff · land · goto · RTL…</span></div>
+      </div>
+    </div>
+    <div class="arrow-down">↓</div>
+
+    <!-- Hardware -->
+    <div style="text-align:center;padding:12px;background:var(--surface2);border-radius:8px;border:1px solid var(--border)">
+      <strong style="color:var(--purple);font-size:14px">🚁 Drone Hardware / Simulator</strong>
+    </div>
+
+    <!-- Vision aside -->
+    <div style="margin-top:20px" class="layer layer-6">
+      <div class="layer-header">Vision Subsystem (bypasses safety pipeline) <span class="file-tag">vision/</span> <span class="file-tag">localization/</span></div>
+      <div class="layer-body">
+        <div class="mini-card"><strong>OakPipeline</strong><span>OAK-D Lite · DepthAI v3 · stereo depth + YOLO</span></div>
+        <div class="mini-card"><strong>VisionTool</strong><span>obstacle_check · depth_snapshot · detect_objects</span></div>
+        <div class="mini-card"><strong>DepthAnalyzer</strong><span>3×3 grid · landing zone · COCO labels</span></div>
+        <div class="mini-card"><strong>Localizer</strong><span>Camera → FRD → NED → GPS</span></div>
+        <div class="mini-card"><strong>PoseCache</strong><span>Thread-safe telemetry + GPS merge</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════ PIPELINE ═══════════════════════════════ -->
+<section id="pipeline">
+  <h2><span class="dot" style="background:var(--green)"></span>Full Data Flow Pipeline</h2>
+
+  <div class="card accent-blue" style="margin-bottom:20px">
+    <h3>End-to-End Request Flow</h3>
+    <div class="flow-box">
+      <div class="flow-row"><div class="flow-from">🎙 Bangla voice</div><div class="flow-arrow">→</div><div class="flow-to">MicCapture.run()</div><div class="flow-note">PCM chunks → mic_queue</div></div>
+      <div class="flow-row"><div class="flow-from">mic_queue</div><div class="flow-arrow">→</div><div class="flow-to">app.send_audio()</div><div class="flow-note">streams to Gemini session</div></div>
+      <div class="flow-row"><div class="flow-from">Gemini Live API</div><div class="flow-arrow">→</div><div class="flow-to">app.receive_responses()</div><div class="flow-note">tool_call + args returned</div></div>
+      <div class="flow-row"><div class="flow-from">tool_call event</div><div class="flow-arrow">→</div><div class="flow-to">ToolDispatcher.dispatch()</div><div class="flow-note">registry → safety → execute</div></div>
+      <div class="flow-row"><div class="flow-from">vision tools</div><div class="flow-arrow">→</div><div class="flow-to">VisionTool.execute()</div><div class="flow-note">bypass safety, asyncio.to_thread</div></div>
+      <div class="flow-row"><div class="flow-from">adapter result</div><div class="flow-arrow">→</div><div class="flow-to">StateMachine.transition()</div><div class="flow-note">state update</div></div>
+      <div class="flow-row"><div class="flow-from">ToolResponse</div><div class="flow-arrow">→</div><div class="flow-to">Planner.decide()</div><div class="flow-note">CONTINUE/WAIT/RETRY/REPLAN/ABORT/FAILSAFE</div></div>
+      <div class="flow-row"><div class="flow-from">AI text/audio</div><div class="flow-arrow">→</div><div class="flow-to">audio_queue → Playback</div><div class="flow-note">speaker output</div></div>
+      <div class="flow-row"><div class="flow-from">ToolResponse</div><div class="flow-arrow">→</div><div class="flow-to">MissionMemory.log_event()</div><div class="flow-note">persisted to JSONL</div></div>
+    </div>
+  </div>
+
+  <div class="grid grid-2">
+    <div class="card accent-purple">
+      <h3>Background Tasks (never paused)</h3>
+      <div class="flow-box">
+        <div class="flow-row"><div class="flow-from">TelemetryReader</div><div class="flow-arrow">→</div><div class="flow-to">safety + pose_cache</div></div>
+        <div class="flow-row"><div class="flow-from">BatteryMonitor</div><div class="flow-arrow">→</div><div class="flow-to">planner.trigger_failsafe()</div></div>
+        <div class="flow-row"><div class="flow-from">PositionMonitor</div><div class="flow-arrow">→</div><div class="flow-to">pose_cache.update_position()</div></div>
+      </div>
+    </div>
+    <div class="card accent-red">
+      <h3>Failsafe Triggers</h3>
+      <div class="flow-box">
+        <div class="flow-row"><div class="flow-from">battery &lt; 15%</div><div class="flow-arrow">→</div><div class="flow-to">BatteryMonitor → trigger_failsafe()</div></div>
+        <div class="flow-row"><div class="flow-from">telemetry &gt; 10s stale</div><div class="flow-arrow">→</div><div class="flow-to">TELEMETRY_EMERGENCY</div></div>
+        <div class="flow-row"><div class="flow-from">retries ≥ 3</div><div class="flow-arrow">→</div><div class="flow-to">SafetyPolicy → error</div></div>
+        <div class="flow-row"><div class="flow-from">planner FAILSAFE</div><div class="flow-arrow">→</div><div class="flow-to">force_failsafe() + run_emergency()</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════ AUDIO ═══════════════════════════════ -->
+<section id="audio">
+  <h2><span class="dot" style="background:var(--teal)"></span>Audio Interface <span class="file-tag">audio/</span></h2>
+  <div class="grid grid-3">
+    <div class="card accent-teal">
+      <h3><span class="file-tag">mic_capture.py</span> MicCapture</h3>
+      <div class="method"><div class="name">__init__(pya, mic_queue)</div><div class="desc">Initialize PyAudio + queue reference</div></div>
+      <div class="method"><div class="name">run(turn_manager)</div><div class="desc">Main loop: read PCM chunks, check is_blocked(), enqueue to mic_queue</div></div>
+      <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;color:var(--muted)">
+        Stops feeding mic when TurnManager is blocked (AI speaking)
+      </div>
+    </div>
+    <div class="card accent-teal">
+      <h3><span class="file-tag">playback.py</span> Playback</h3>
+      <div class="method"><div class="name">__init__(pya, audio_queue)</div><div class="desc">Initialize PyAudio output stream</div></div>
+      <div class="method"><div class="name">run(turn_manager)</div><div class="desc">Dequeue AI audio chunks → speaker; calls turn_manager.unblock() when queue empty</div></div>
+      <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;color:var(--muted)">
+        Signals TurnManager when AI finishes speaking
+      </div>
+    </div>
+    <div class="card accent-teal">
+      <h3><span class="file-tag">turn_manager.py</span> TurnManager</h3>
+      <div class="method"><div class="name">__init__()</div><div class="desc">Initialize _blocked = False</div></div>
+      <div class="method"><div class="name">block()</div><div class="desc">Mute mic — AI is speaking or critical action</div></div>
+      <div class="method"><div class="name">unblock()</div><div class="desc">Unmute mic — AI done speaking</div></div>
+      <div class="method"><div class="name">is_blocked()</div><div class="desc">Returns current block state</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════ LLM ═══════════════════════════════ -->
+<section id="llm">
+  <h2><span class="dot" style="background:var(--green)"></span>LLM Orchestration <span class="file-tag">app.py</span></h2>
+  <div class="grid grid-2">
+    <div class="card accent-green">
+      <h3>DroneAI class</h3>
+      <div class="method"><div class="name">__init__()</div><div class="desc">Initialize all subsystems: adapter, vision, audio, telemetry, memory, state machine</div></div>
+      <div class="method"><div class="name">send_audio()</div><div class="desc"><span class="tag async">async</span> Streams mic PCM to active Gemini session</div></div>
+      <div class="method"><div class="name">_log_model_parts(r)</div><div class="desc">Extract and log thought/text parts from Gemini response</div></div>
+      <div class="method"><div class="name">receive_responses()</div><div class="desc"><span class="tag async">async</span> Main Gemini event loop; processes tool calls, routes to dispatcher</div></div>
+      <div class="method"><div class="name">run()</div><div class="desc"><span class="tag async">async</span> Entry point; manages session lifecycle and background tasks</div></div>
+    </div>
+    <div class="card accent-green">
+      <h3>Module-level factories</h3>
+      <div class="method"><div class="name">build_adapter()</div><div class="desc">Factory: creates SimAdapter or MAVLinkAdapter from DRONE_BACKEND env var</div></div>
+      <div class="method"><div class="name">build_vision(localizer)</div><div class="desc">Factory: initializes OAK-D Lite pipeline; non-fatal if hardware unavailable</div></div>
+      <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:10px">
+        <h3>Task isolation model</h3>
+        <p style="font-size:12px;color:var(--muted)">Session tasks (mic, send, receive, playback) are isolated from background tasks (telemetry, battery, position). A crash in one task group does not kill the other.</p>
+      </div>
+    </div>
+  </div>
+  <div class="card accent-blue" style="margin-top:16px">
+    <h3><span class="file-tag">tools/declarations.py</span> — FUNCTION_DECLARATIONS (26 tools exposed to Gemini)</h3>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:10px">List of <code>types.FunctionDeclaration</code> objects defining the Gemini function-calling schema</p>
+    <div class="tool-grid">
+      <div style="font-size:11px;color:var(--yellow);font-family:monospace;padding:3px 0" v-for="t in tools">get_current_state</div>
+      <div style="font-size:11px;color:var(--yellow);font-family:monospace;padding:3px 0">get_telemetry</div>
+      <div style="font-size:11px;color:var(--yellow);font-family:monospace;padding:3px 0">get_position_str</div>
+      <div style="font-size:11px;color:var(--yellow);font-family:monospace;padding:3px 0">get_battery</div>
+      <div style="font-size:11px;color:var(--yellow);font-family:monospace;padding:3px 0">get_distance_to_str</div>
+      <div style="font-size:11px;color:var(--yellow);font-family:monospace;padding:3px 0">connect_drone</div>
+      <div style="font-size:11px;color:var(--yellow);font-family:monospace;padding:3px 0">set_mode</div>
+      <div style="font-size:11px;color:var(--yellow);font-family:monospace;padding:3px 0">arm_drone</div>
+      <div style="font-size:11px;color:var(--yellow);font-family:monospace;padding:3px 0">disarm_drone</div>
+      <div style="font-size:11px;color:var(--yellow);font-family:monospace;padding:3px 0">takeoff</div>
+      <div style="font-size:11px;color:var(--yellow);font-family:monospace;padding:3px 0">land</div>
+      <div style="font-size:11px;color:var(--yellow);font-family:monospace;padding:3px 0">return_to_launch</div>
+      <div style="font-size:11px;color:var(--yellow);font-family:monospace;padding:3px 0">goto_position</div>
+      <div style="font-size:11px;color:var(--yellow);font-family:monospace;padding:3px 0">set_yaw</div>
+      <div style="font-size:11px;color:var(--yellow);font-family:monospace;padding:3px 0">set_speed</div>
+      <div style="font-size:11px;color:var(--yellow);font-family:monospace;padding:3px 0">wait_altitude</div>
+      <div style="font-size:11px;color:var(--yellow);font-family:monospace;padding:3px 0">wait_arrival</div>
+      <div style="font-size:11px;color:var(--yellow);font-family:monospace;padding:3px 0">wait_time</div>
+      <div style="font-size:11px;color:var(--yellow);font-family:monospace;padding:3px 0">vision_obstacle_check</div>
+      <div style="font-size:11px;color:var(--yellow);font-family:monospace;padding:3px 0">vision_depth_snapshot</div>
+      <div style="font-size:11px;color:var(--yellow);font-family:monospace;padding:3px 0">vision_detect_objects</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════ PLANNER ═══════════════════════════════ -->
+<section id="planner">
+  <h2><span class="dot" style="background:var(--yellow)"></span>Mission Planner <span class="file-tag">planner.py</span></h2>
+  <div class="grid grid-2">
+    <div class="card accent-yellow">
+      <h3>PlanDecision enum</h3>
+      <div class="decision">
+        <span class="dec-chip" style="background:#1a2c1a;color:var(--green)">CONTINUE</span>
+        <span class="dec-chip" style="background:#2a2a1a;color:var(--yellow)">WAIT</span>
+        <span class="dec-chip" style="background:#2a1f1a;color:var(--orange)">RETRY</span>
+        <span class="dec-chip" style="background:#2a1a2a;color:var(--purple)">REPLAN</span>
+        <span class="dec-chip" style="background:#2a1a1a;color:var(--red)">ABORT</span>
+        <span class="dec-chip" style="background:#2a1a1a;color:var(--red);border:1px solid var(--red)">FAILSAFE</span>
+      </div>
+    </div>
+    <div class="card accent-yellow">
+      <h3>Planner class</h3>
+      <div class="method"><div class="name">__init__(...)</div><div class="desc">Wire state_machine, safety_policy, dispatcher</div></div>
+      <div class="method"><div class="name">decide(response)</div><div class="desc">Main engine: analyze ToolResponse, apply safety overrides → PlanDecision</div></div>
+      <div class="method"><div class="name">schedule_wait(wait)</div><div class="desc">Non-blocking: set timer; audio/telemetry continue during wait</div></div>
+      <div class="method"><div class="name">is_waiting()</div><div class="desc">True if wait duration not yet elapsed</div></div>
+      <div class="method"><div class="name">wait_remaining()</div><div class="desc">Remaining seconds in active wait</div></div>
+      <div class="method"><div class="name">run_workflow(fn, *args)</div><div class="desc">Execute code-driven workflow coroutine</div></div>
+      <div class="method"><div class="name">trigger_failsafe(reason)</div><div class="desc">Force FAILSAFE state + run emergency workflow</div></div>
+      <div class="method"><div class="name">abort()</div><div class="desc">Flag mission as aborted</div></div>
+    </div>
+  </div>
+  <div class="card accent-orange" style="margin-top:16px">
+    <h3>Key Design: Planner Authority</h3>
+    <p style="font-size:12px;color:var(--muted)">The Planner can <strong style="color:var(--orange)">override</strong> the LLM's <code>next_action</code> at any time for safety. The LLM suggests — the Planner decides. Non-blocking waits allow audio and telemetry to continue running during motor spin-up or altitude stabilization.</p>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════ DISPATCHER ═══════════════════════════════ -->
+<section id="dispatcher">
+  <h2><span class="dot" style="background:var(--red)"></span>Tool Dispatcher <span class="file-tag">tool_dispatcher.py</span></h2>
+
+  <h3 style="margin-bottom:12px;color:var(--text)">7-Step Execution Pipeline</h3>
+  <div class="pipeline">
+    <div class="pipe-step">
+      <div class="num">1</div>
+      <div class="title">Registry Check</div>
+      <div class="sub">Does tool exist in TOOL_REGISTRY?</div>
+    </div>
+    <div class="pipe-step warn">
+      <div class="num">2</div>
+      <div class="title">Safety Pre-check</div>
+      <div class="sub">battery · telemetry · altitude · speed · retries</div>
+    </div>
+    <div class="pipe-step ok">
+      <div class="num">3</div>
+      <div class="title">Execute</div>
+      <div class="sub">asyncio.to_thread() · 10s timeout</div>
+    </div>
+    <div class="pipe-step">
+      <div class="num">4</div>
+      <div class="title">State Transition</div>
+      <div class="sub">state_machine.transition()</div>
+    </div>
+    <div class="pipe-step">
+      <div class="num">5</div>
+      <div class="title">Update Monitors</div>
+      <div class="sub">safety_policy updates</div>
+    </div>
+    <div class="pipe-step ok">
+      <div class="num">6</div>
+      <div class="title">Reset Retry</div>
+      <div class="sub">reset_retry() on success</div>
+    </div>
+    <div class="pipe-step ok">
+      <div class="num">7</div>
+      <div class="title">Return ToolResponse</div>
+      <div class="sub">Normalized envelope</div>
+    </div>
+  </div>
+
+  <div class="grid grid-2" style="margin-top:16px">
+    <div class="card accent-red">
+      <h3>ToolDispatcher class</h3>
+      <div class="method"><div class="name">__init__(...)</div><div class="desc">Wire state_machine, safety_policy, adapter, vision_tool</div></div>
+      <div class="method"><div class="name">dispatch(tool_name, args)</div><div class="desc">Main entry: validate → safety → execute → state → normalize</div></div>
+      <div class="method"><div class="name">_dispatch_vision(...)</div><div class="desc">Vision bypass: skip safety, route to VisionTool.execute via asyncio.to_thread</div></div>
+    </div>
+    <div class="card accent-red">
+      <h3>Module constants</h3>
+      <div class="const"><div class="name">_VISION_TOOLS</div><div style="font-size:11px;color:var(--muted)">Set of vision tool names that bypass safety checks</div></div>
+      <div class="const" style="margin-top:8px"><div class="name">TOOL_STATE_TRANSITIONS</div><div style="font-size:11px;color:var(--muted)">Dict: tool_name → target MissionState</div></div>
+      <div class="const" style="margin-top:8px"><div class="name">TOOL_NEXT_ACTION</div><div style="font-size:11px;color:var(--muted)">Dict: tool_name → suggested next action</div></div>
+      <div class="const" style="margin-top:8px"><div class="name">TOOL_WAIT_HINTS</div><div style="font-size:11px;color:var(--muted)">Dict: tool_name → WaitInstruction(seconds, reason)</div></div>
+      <div class="const" style="margin-top:8px"><div class="name">TOOL_TIMEOUT_SEC = 10.0</div><div style="font-size:11px;color:var(--muted)">Max execution time per tool</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════ STATE MACHINE ═══════════════════════════════ -->
+<section id="statemachine">
+  <h2><span class="dot" style="background:var(--accent)"></span>State Machine <span class="file-tag">state_machine.py</span></h2>
+
+  <div class="card accent-blue" style="margin-bottom:16px">
+    <h3>Mission States & Legal Transitions</h3>
+    <div class="state-diagram">
+      <div class="state-node start">IDLE</div>
+      <div class="state-arrow">→</div>
+      <div class="state-node start">CONNECTED</div>
+      <div class="state-arrow">→</div>
+      <div class="state-node start">ARMED</div>
+      <div class="state-arrow">→</div>
+      <div class="state-node fly">TAKEOFF</div>
+      <div class="state-arrow">→</div>
+      <div class="state-node fly">ENROUTE</div>
+      <div class="state-arrow">→</div>
+      <div class="state-node fly">HOVER</div>
+    </div>
+    <div class="state-diagram" style="margin-top:8px">
+      <div class="state-node fly">HOVER</div>
+      <div class="state-arrow">→</div>
+      <div class="state-node fly">LANDING</div>
+      <div class="state-arrow">→</div>
+      <div class="state-node start">IDLE</div>
+      <div style="width:40px"></div>
+      <div class="state-node fly">HOVER</div>
+      <div class="state-arrow">→</div>
+      <div class="state-node fly">RTL</div>
+      <div class="state-arrow">→</div>
+      <div class="state-node fly">LANDING</div>
+    </div>
+    <div class="state-diagram" style="margin-top:8px">
+      <div class="state-node danger" style="border-style:dashed">FAILSAFE</div>
+      <div class="state-arrow">←</div>
+      <div style="font-size:12px;color:var(--red)">force_failsafe() allowed from <strong>ANY</strong> state</div>
+    </div>
+  </div>
+
+  <div class="grid grid-2">
+    <div class="card accent-blue">
+      <h3>StateMachine class</h3>
+      <div class="method"><div class="name">__init__()</div><div class="desc">Initialize to IDLE state</div></div>
+      <div class="method"><div class="name">state</div><div class="desc">Property: current MissionState</div></div>
+      <div class="method"><div class="name">transition(new_state)</div><div class="desc">Legal state change; raises IllegalTransitionError on invalid move</div></div>
+      <div class="method"><div class="name">force_failsafe()</div><div class="desc">Bypass rules → always transition to FAILSAFE</div></div>
+      <div class="method"><div class="name">is_airborne()</div><div class="desc">True if TAKEOFF | ENROUTE | HOVER | RTL</div></div>
+      <div class="method"><div class="name">history()</div><div class="desc">List of (from_state, to_state) tuples</div></div>
+      <div class="method"><div class="name">to_dict()</div><div class="desc">Serializable dict with state + history</div></div>
+    </div>
+    <div class="card accent-blue">
+      <h3>MissionState enum + exceptions</h3>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">
+        <code>IDLE</code><code>CONNECTED</code><code>ARMED</code><code>TAKEOFF</code>
+        <code>ENROUTE</code><code>HOVER</code><code>LANDING</code><code>RTL</code><code>FAILSAFE</code>
+      </div>
+      <div class="const"><div class="name">LEGAL_TRANSITIONS</div><div style="font-size:11px;color:var(--muted)">Dict mapping each state to its set of allowed next states</div></div>
+      <div style="margin-top:10px"><div class="name" style="color:var(--red);font-family:monospace;font-size:12px">IllegalTransitionError</div><div style="font-size:11px;color:var(--muted)">Raised on invalid state change attempt</div></div>
+      <div style="margin-top:10px;font-size:11px;color:var(--muted);padding:8px;background:var(--surface2);border-radius:6px">
+        <strong style="color:var(--green)">is_airborne()</strong> covers: TAKEOFF, ENROUTE, HOVER, LANDING, RTL
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════ SAFETY ═══════════════════════════════ -->
+<section id="safety">
+  <h2><span class="dot" style="background:var(--red)"></span>Safety Policy <span class="file-tag">safety_policy.py</span></h2>
+  <div class="grid grid-2">
+    <div class="card accent-red">
+      <h3>SafetyPolicy class</h3>
+      <div class="method"><div class="name">__init__(state_machine)</div><div class="desc">Init with state machine ref; zero retry/battery/altitude</div></div>
+      <div class="method"><div class="name">update_telemetry_timestamp()</div><div class="desc">Mark current time as last good telemetry</div></div>
+      <div class="method"><div class="name">update_battery(pct)</div><div class="desc">Cache battery percentage</div></div>
+      <div class="method"><div class="name">update_altitude(alt_m)</div><div class="desc">Cache current altitude</div></div>
+      <div class="method"><div class="name">check_telemetry_freshness()</div><div class="desc">Error if stale (TELEMETRY_STALE) or emergency (TELEMETRY_EMERGENCY)</div></div>
+      <div class="method"><div class="name">check_battery()</div><div class="desc">Error if BATTERY_CRITICAL (&lt;15%) or BATTERY_LOW (≤25%)</div></div>
+      <div class="method"><div class="name">check_altitude(target_alt)</div><div class="desc">Error if exceeds ALTITUDE_CEILING_M (120m)</div></div>
+      <div class="method"><div class="name">check_speed(speed_ms)</div><div class="desc">Error if exceeds MAX_SPEED_MS (15 m/s)</div></div>
+      <div class="method"><div class="name">check_command_legality(tool, state)</div><div class="desc">Verify tool allowed in current state</div></div>
+      <div class="method"><div class="name">increment_retry(tool)</div><div class="desc">Increment retry count for tool</div></div>
+      <div class="method"><div class="name">reset_retry(tool)</div><div class="desc">Clear retry count on success</div></div>
+      <div class="method"><div class="name">check_retry_limit(tool)</div><div class="desc">Error if MAX_RETRY_COUNT (3) exceeded</div></div>
+      <div class="method"><div class="name">pre_execute_check(tool, args)</div><div class="desc">Run all checks; return first blocking error or None</div></div>
+    </div>
+    <div>
+      <div class="card accent-red" style="margin-bottom:12px">
+        <h3>SafetyViolation exception</h3>
+        <p style="font-size:12px;color:var(--muted)">Wraps <code>ErrorSchema</code>; raised when pre_execute_check blocks execution</p>
+      </div>
+      <div class="card accent-yellow">
+        <h3>Safety Thresholds</h3>
+        <div class="threshold"><div class="key">BATTERY_CRITICAL</div><div class="val">&lt; 15%</div><div class="desc">→ FAILSAFE</div></div>
+        <div class="threshold"><div class="key">BATTERY_LOW</div><div class="val">≤ 25%</div><div class="desc">→ warn</div></div>
+        <div class="threshold"><div class="key">ALTITUDE_CEILING_M</div><div class="val">120 m</div><div class="desc">hard ceiling</div></div>
+        <div class="threshold"><div class="key">MAX_SPEED_MS</div><div class="val">15 m/s</div><div class="desc">hard limit</div></div>
+        <div class="threshold"><div class="key">TELEMETRY_STALE_S</div><div class="val">5 s</div><div class="desc">→ wait</div></div>
+        <div class="threshold"><div class="key">TELEMETRY_EMERGENCY_S</div><div class="val">10 s</div><div class="desc">→ failsafe</div></div>
+        <div class="threshold"><div class="key">MAX_RETRY_COUNT</div><div class="val">3</div><div class="desc">per tool</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════ TOOLS ═══════════════════════════════ -->
+<section id="tools">
+  <h2><span class="dot" style="background:var(--orange)"></span>Tool Registry <span class="file-tag">tool_registry.py</span></h2>
+  <p style="color:var(--muted);margin-bottom:14px;font-size:13px">Each tool has: description · args_schema · permission_level · allowed_states</p>
+  <div class="tool-grid">
+    <div class="tool-chip"><div class="tname">connect_drone</div><div class="tperm critical">● critical</div></div>
+    <div class="tool-chip"><div class="tname">get_current_state</div><div class="tperm read">● read</div></div>
+    <div class="tool-chip"><div class="tname">get_telemetry</div><div class="tperm read">● read</div></div>
+    <div class="tool-chip"><div class="tname">get_position_str</div><div class="tperm read">● read</div></div>
+    <div class="tool-chip"><div class="tname">get_battery</div><div class="tperm read">● read</div></div>
+    <div class="tool-chip"><div class="tname">get_distance_to_str</div><div class="tperm read">● read</div></div>
+    <div class="tool-chip"><div class="tname">set_mode</div><div class="tperm write">● write</div></div>
+    <div class="tool-chip"><div class="tname">arm_drone</div><div class="tperm critical">● critical</div></div>
+    <div class="tool-chip"><div class="tname">disarm_drone</div><div class="tperm critical">● critical</div></div>
+    <div class="tool-chip"><div class="tname">takeoff</div><div class="tperm critical">● critical</div></div>
+    <div class="tool-chip"><div class="tname">land</div><div class="tperm critical">● critical</div></div>
+    <div class="tool-chip"><div class="tname">return_to_launch</div><div class="tperm critical">● critical</div></div>
+    <div class="tool-chip"><div class="tname">goto_position</div><div class="tperm write">● write</div></div>
+    <div class="tool-chip"><div class="tname">set_yaw</div><div class="tperm write">● write</div></div>
+    <div class="tool-chip"><div class="tname">set_speed</div><div class="tperm write">● write</div></div>
+    <div class="tool-chip"><div class="tname">wait_altitude</div><div class="tperm read">● read</div></div>
+    <div class="tool-chip"><div class="tname">wait_arrival</div><div class="tperm read">● read</div></div>
+    <div class="tool-chip"><div class="tname">wait_time</div><div class="tperm read">● read</div></div>
+    <div class="tool-chip"><div class="tname">vision_obstacle_check</div><div class="tperm read">● read (vision)</div></div>
+    <div class="tool-chip"><div class="tname">vision_depth_snapshot</div><div class="tperm read">● read (vision)</div></div>
+    <div class="tool-chip"><div class="tname">vision_detect_objects</div><div class="tperm read">● read (vision)</div></div>
+  </div>
+  <div style="margin-top:14px;padding:10px 14px;background:var(--surface2);border-radius:6px;font-size:11px;color:var(--muted)">
+    <strong style="color:var(--orange)">Note:</strong> Vision tools bypass safety checks entirely — they route directly through <code>_dispatch_vision()</code> and never touch the drone adapter.
+  </div>
+</section>
+
+<!-- ═══════════════════════════════ ADAPTERS ═══════════════════════════════ -->
+<section id="adapters">
+  <h2><span class="dot" style="background:var(--purple)"></span>Drone Adapters <span class="file-tag">adapters/</span></h2>
+  <div class="grid grid-3" style="margin-bottom:16px">
+    <div class="card accent-purple">
+      <h3><span class="file-tag">base_adapter.py</span> BaseAdapter (ABC)</h3>
+      <div class="method"><div class="name">execute(tool_name, args)</div><div class="desc">Execute named tool; return dict result</div></div>
+      <div class="method"><div class="name">is_connected()</div><div class="desc">Check connection status</div></div>
+      <div class="method"><div class="name">disconnect()</div><div class="desc">Clean up connection</div></div>
+    </div>
+    <div class="card accent-green">
+      <h3><span class="file-tag">sim_adapter.py</span> SimAdapter</h3>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:8px">Default backend · in-memory simulation · no hardware needed</p>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:6px">Internal state: _connected, _armed, _mode, _altitude, _lat, _lon, _heading, _speed, _battery_pct</div>
+      <div class="method"><div class="name">execute(tool_name, args)</div><div class="desc">Route to _handle_&lt;tool_name&gt;() methods</div></div>
+      <div style="font-size:11px;color:var(--teal);margin-top:6px">Battery decrements · altitude tracks takeoff/land · position updates on goto</div>
+    </div>
+    <div class="card accent-orange">
+      <h3><span class="file-tag">mavlink_adapter.py</span> MAVLinkAdapter</h3>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:8px">Real ArduCopter hardware · pymavlink · DRONE_BACKEND=mavlink</p>
+      <div class="method"><div class="name">__init__(connection_string)</div><div class="desc">Connect via MAVLink URI</div></div>
+      <div class="method"><div class="name">_recv(msg_type, timeout)</div><div class="desc">Receive MAVLink message with timeout</div></div>
+      <div class="method"><div class="name">_send_command_long(...)</div><div class="desc">Send command + wait for ACK</div></div>
+      <div class="method"><div class="name">_haversine_m(...)</div><div class="desc">GPS distance calculation</div></div>
+    </div>
+  </div>
+
+  <div class="card accent-purple">
+    <h3>18 Shared Handler Methods (both adapters)</h3>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(220px,1fr));gap:8px;margin-top:8px">
+      <div style="font-size:11px;color:var(--muted)"><code>_handle_connect_drone</code> → <span style="color:var(--teal)">status, connection_string</span></div>
+      <div style="font-size:11px;color:var(--muted)"><code>_handle_get_telemetry</code> → <span style="color:var(--teal)">altitude, airspeed, groundspeed, heading</span></div>
+      <div style="font-size:11px;color:var(--muted)"><code>_handle_get_position_str</code> → <span style="color:var(--teal)">position string</span></div>
+      <div style="font-size:11px;color:var(--muted)"><code>_handle_get_battery</code> → <span style="color:var(--teal)">voltage, current, <strong>level_percent</strong></span></div>
+      <div style="font-size:11px;color:var(--muted)"><code>_handle_get_current_state</code> → <span style="color:var(--teal)">mode, armed, system_status</span></div>
+      <div style="font-size:11px;color:var(--muted)"><code>_handle_get_distance_to_str</code> → <span style="color:var(--teal)">distance_str, bearing</span></div>
+      <div style="font-size:11px;color:var(--muted)"><code>_handle_set_mode</code> → <span style="color:var(--teal)">status, mode</span></div>
+      <div style="font-size:11px;color:var(--muted)"><code>_handle_arm_drone</code> → <span style="color:var(--teal)">status: "armed"</span></div>
+      <div style="font-size:11px;color:var(--muted)"><code>_handle_disarm_drone</code> → <span style="color:var(--teal)">status: "disarmed"</span></div>
+      <div style="font-size:11px;color:var(--muted)"><code>_handle_takeoff</code> → <span style="color:var(--teal)">status, target_altitude</span></div>
+      <div style="font-size:11px;color:var(--muted)"><code>_handle_land</code> → <span style="color:var(--teal)">status: "landing"</span></div>
+      <div style="font-size:11px;color:var(--muted)"><code>_handle_return_to_launch</code> → <span style="color:var(--teal)">status: "returning_to_launch"</span></div>
+      <div style="font-size:11px;color:var(--muted)"><code>_handle_goto_position</code> → <span style="color:var(--teal)">status, target {lat,lon,alt}</span></div>
+      <div style="font-size:11px;color:var(--muted)"><code>_handle_set_yaw</code> → <span style="color:var(--teal)">status, yaw_deg</span></div>
+      <div style="font-size:11px;color:var(--muted)"><code>_handle_set_speed</code> → <span style="color:var(--teal)">status, speed_ms</span></div>
+      <div style="font-size:11px;color:var(--muted)"><code>_handle_wait_altitude</code> → <span style="color:var(--teal)">status, altitude</span></div>
+      <div style="font-size:11px;color:var(--muted)"><code>_handle_wait_arrival</code> → <span style="color:var(--teal)">status: "arrived"</span></div>
+      <div style="font-size:11px;color:var(--muted)"><code>_handle_wait_time</code> → <span style="color:var(--teal)">status, waited_seconds</span></div>
+    </div>
+    <div style="margin-top:10px;padding:8px 10px;background:var(--surface2);border-radius:6px;font-size:11px;color:var(--red)">
+      ⚠ <code>level_percent</code> (not <code>percent</code> or <code>battery_pct</code>) — safety_policy reads this exact key name
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════ VISION ═══════════════════════════════ -->
+<section id="vision">
+  <h2><span class="dot" style="background:var(--teal)"></span>Vision System <span class="file-tag">vision/</span></h2>
+  <div class="grid grid-2" style="margin-bottom:16px">
+    <div class="card accent-teal">
+      <h3><span class="file-tag">oak_pipeline.py</span> OakPipeline</h3>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:8px">DepthAI v3 pipeline manager for OAK-D Lite stereo camera</p>
+      <div class="method"><div class="name">__init__(fps, blob_path, ...)</div><div class="desc">Configure pipeline parameters</div></div>
+      <div class="method"><div class="name">start()</div><div class="desc">Build + start pipeline: RGB, StereoDepth, SpatialLocationCalculator (5 sectors), optional YOLO</div></div>
+      <div class="method"><div class="name">stop()</div><div class="desc">Tear down pipeline</div></div>
+      <div class="method"><div class="name">available</div><div class="desc">Property: True if pipeline running</div></div>
+      <div class="method"><div class="name">detection_available</div><div class="desc">Property: True if YOLO blob loaded</div></div>
+      <div class="method"><div class="name">get_depth_frame()</div><div class="desc">Return uint16 depth array (mm)</div></div>
+      <div class="method"><div class="name">get_sector_distances()</div><div class="desc">Dict {sector_name: depth_mm} for 5 horizontal sectors</div></div>
+      <div class="method"><div class="name">get_detections()</div><div class="desc">List of YOLO detections with spatial coords</div></div>
+      <div class="method"><div class="name">_setup_yolo(...)</div><div class="desc">Configure YOLO spatial detection network</div></div>
+    </div>
+    <div class="card accent-teal">
+      <h3><span class="file-tag">vision_tool.py</span> VisionTool</h3>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:8px">Synchronous vision tool executor (dispatcher wraps in asyncio.to_thread)</p>
+      <div class="method"><div class="name">__init__(pipeline, localizer)</div><div class="desc">Wire OakPipeline + optional Localizer</div></div>
+      <div class="method"><div class="name">execute(tool_name, args)</div><div class="desc">Route to tool handler; return dict result</div></div>
+      <div class="method"><div class="name">_obstacle_check(args)</div><div class="desc">Poll SpatialLocationCalculator for 5 sectors; enrich with localizer if available</div></div>
+      <div class="method"><div class="name">_depth_snapshot(args)</div><div class="desc">Capture depth frame; analyze 3×3 grid; assess landing zone</div></div>
+      <div class="method"><div class="name">_detect_objects(args)</div><div class="desc">Run YOLO detection; filter by confidence; enrich with localizer</div></div>
+      <div class="method"><div class="name">_wait_for(coro)</div><div class="desc">Poll async coroutine until result or timeout</div></div>
+    </div>
+  </div>
+  <div class="card accent-teal">
+    <h3><span class="file-tag">depth_analyzer.py</span> — Pure analysis functions</h3>
+    <div class="grid grid-3">
+      <div>
+        <div class="method"><div class="name">label_name(label_id)</div><div class="desc">COCO class name from ID (80 classes)</div></div>
+        <div class="method"><div class="name">analyze_depth_grid(...)</div><div class="desc">Divide depth frame into 3×3 grid; per-cell stats + nearest + coverage</div></div>
+        <div class="method"><div class="name">check_landing_zone(...)</div><div class="desc">Assess center zone for landing suitability; safe flag + reason</div></div>
+      </div>
+      <div>
+        <div style="font-size:12px;color:var(--muted)">
+          <strong style="color:var(--teal)">5 OAK Sectors</strong><br>
+          far_left · left · center · right · far_right<br><br>
+          <strong style="color:var(--teal)">3×3 Depth Grid cells</strong><br>
+          top_left · top_center · top_right<br>
+          mid_left · mid_center · mid_right<br>
+          bot_left · bot_center · bot_right
+        </div>
+      </div>
+      <div>
+        <div style="font-size:11px;color:var(--muted)">
+          <strong style="color:var(--teal)">COCO_LABELS</strong> — 80 class names<br><br>
+          <strong style="color:var(--teal)">_YOLO_ANCHORS</strong><br>
+          <strong style="color:var(--teal)">_YOLO_ANCHOR_MASKS</strong><br>
+          <strong style="color:var(--teal)">_SECTORS</strong> — 5 ROI dicts
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════ LOCALIZATION ═══════════════════════════════ -->
+<section id="localization">
+  <h2><span class="dot" style="background:var(--pink)"></span>Localization <span class="file-tag">localization/</span></h2>
+
+  <div class="card accent-pink" style="margin-bottom:16px">
+    <h3>Coordinate Frame Chain</h3>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:12px">
+      <div style="background:var(--surface2);padding:8px 12px;border-radius:6px;border:1px solid var(--border)">
+        <strong style="color:var(--pink)">Camera Frame</strong><br>
+        <span style="color:var(--muted)">x=R, y=D, z=F<br>units: mm</span>
+      </div>
+      <div style="color:var(--accent);font-size:20px">→</div>
+      <div style="background:var(--surface2);padding:8px 12px;border-radius:6px;border:1px solid var(--border)">
+        <strong style="color:var(--pink)">Drone FRD</strong><br>
+        <span style="color:var(--muted)">Forward-Right-Down<br>units: m</span>
+      </div>
+      <div style="color:var(--accent);font-size:20px">→</div>
+      <div style="background:var(--surface2);padding:8px 12px;border-radius:6px;border:1px solid var(--border)">
+        <strong style="color:var(--pink)">World NED</strong><br>
+        <span style="color:var(--muted)">North-East-Down<br>units: m</span>
+      </div>
+      <div style="color:var(--accent);font-size:20px">→</div>
+      <div style="background:var(--surface2);padding:8px 12px;border-radius:6px;border:1px solid var(--border)">
+        <strong style="color:var(--pink)">GPS Global</strong><br>
+        <span style="color:var(--muted)">lat, lon, alt_m</span>
+      </div>
+    </div>
+    <div style="margin-top:10px;font-size:11px;color:var(--muted)">
+      <strong style="color:var(--teal)">local_frame</strong> (AI-visible) vs <strong style="color:var(--purple)">global_frame</strong> (backend deque only)
+    </div>
+  </div>
+
+  <div class="grid grid-3">
+    <div class="card accent-pink">
+      <h3><span class="file-tag">frame_transforms.py</span> Pure functions</h3>
+      <div class="method"><div class="name">camera_to_frd(...)</div><div class="desc">Camera frame → drone FRD (pitch + yaw rotation)</div></div>
+      <div class="method"><div class="name">frd_to_ned(...)</div><div class="desc">Drone FRD → world NED (heading rotation)</div></div>
+      <div class="method"><div class="name">ned_to_global(...)</div><div class="desc">NED offset → GPS coords</div></div>
+      <div class="method"><div class="name">local_frame_summary(...)</div><div class="desc">Build AI-visible local_frame dict</div></div>
+      <div class="method"><div class="name">sector_to_frd(sector, z_m)</div><div class="desc">Map 5 horizontal sectors → FRD coords</div></div>
+    </div>
+    <div class="card accent-pink">
+      <h3><span class="file-tag">pose_cache.py</span></h3>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:8px">Thread-safe cache merging telemetry + GPS</p>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:8px">
+        <strong style="color:var(--pink)">DronePose @dataclass</strong><br>
+        lat · lon · alt_m · heading_deg · timestamp
+      </div>
+      <div class="method"><div class="name">update_telemetry(alt, hdg)</div><div class="desc">Called by TelemetryReader</div></div>
+      <div class="method"><div class="name">update_position(lat, lon, alt)</div><div class="desc">Called by PositionMonitor</div></div>
+      <div class="method"><div class="name">get()</div><div class="desc">Return DronePose or None if incomplete</div></div>
+      <div class="method"><div class="name">is_valid(max_age_s)</div><div class="desc">True if complete and fresh</div></div>
+    </div>
+    <div class="card accent-pink">
+      <h3><span class="file-tag">localizer.py</span> Localizer</h3>
+      <div class="method"><div class="name">__init__(...)</div><div class="desc">pose_cache, camera_pitch/yaw, hfov, store_size</div></div>
+      <div class="method"><div class="name">enrich_detection(det)</div><div class="desc">Add local_frame; store global observation</div></div>
+      <div class="method"><div class="name">enrich_sector(sector, z_m)</div><div class="desc">Add local_frame to sector</div></div>
+      <div class="method"><div class="name">enrich_landing_zone(lz)</div><div class="desc">Add local_frame to landing zone assessment</div></div>
+      <div class="method"><div class="name">global_observations()</div><div class="desc">List of GlobalObservation (backend use only)</div></div>
+      <div class="method"><div class="name">_store_global(...)</div><div class="desc">Compute GPS and append to deque</div></div>
+      <div style="margin-top:8px;font-size:11px;color:var(--muted)"><strong style="color:var(--pink)">GlobalObservation @dataclass</strong> — backend-only GPS-tagged detected object</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════ TELEMETRY ═══════════════════════════════ -->
+<section id="telemetry">
+  <h2><span class="dot" style="background:var(--orange)"></span>Telemetry & Monitoring <span class="file-tag">telemetry/</span></h2>
+  <div class="grid grid-3">
+    <div class="card accent-orange">
+      <h3><span class="file-tag">telemetry_reader.py</span> TelemetryReader</h3>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:8px"><span class="tag bg">background</span> Polls telemetry continuously</p>
+      <div class="method"><div class="name">__init__(...)</div><div class="desc">dispatcher, safety_policy, pose_cache, interval</div></div>
+      <div class="method"><div class="name">run()</div><div class="desc">Async loop: poll get_telemetry every interval; update safety + pose_cache</div></div>
+      <div class="method"><div class="name">latest()</div><div class="desc">Return cached telemetry dict</div></div>
+    </div>
+    <div class="card accent-red">
+      <h3><span class="file-tag">battery_monitor.py</span> BatteryMonitor</h3>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:8px"><span class="tag bg">background</span> Auto-failsafe on critical battery</p>
+      <div class="method"><div class="name">__init__(...)</div><div class="desc">dispatcher, safety_policy, planner, interval</div></div>
+      <div class="method"><div class="name">run()</div><div class="desc">Async loop: poll get_battery; if CRITICAL → planner.trigger_failsafe()</div></div>
+    </div>
+    <div class="card accent-orange">
+      <h3><span class="file-tag">position_monitor.py</span> PositionMonitor</h3>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:8px"><span class="tag bg">background</span> Feeds pose_cache with GPS</p>
+      <div class="method"><div class="name">__init__(...)</div><div class="desc">dispatcher, pose_cache, interval</div></div>
+      <div class="method"><div class="name">run()</div><div class="desc">Async loop: poll get_position_str; parse regex → pose_cache</div></div>
+      <div class="method"><div class="name">latest()</div><div class="desc">Return cached position dict</div></div>
+      <div style="margin-top:8px;font-size:11px;color:var(--muted)"><code>_POS_RE</code> parses "Lat: X, Lon: Y, Alt: Zm"</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════ MEMORY ═══════════════════════════════ -->
+<section id="memory">
+  <h2><span class="dot" style="background:var(--purple)"></span>Memory System <span class="file-tag">memory/</span></h2>
+  <div class="grid grid-2">
+    <div class="card accent-purple">
+      <h3><span class="file-tag">mission_memory.py</span> MissionMemory</h3>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:8px">Persistent mission state + event log</p>
+      <div class="method"><div class="name">__init__()</div><div class="desc">Create MEMORY_DIR, load/init mission_state.json</div></div>
+      <div class="method"><div class="name">_load_state()</div><div class="desc">Load from file or return default</div></div>
+      <div class="method"><div class="name">save_state(updates)</div><div class="desc">Update and persist mission state to JSON</div></div>
+      <div class="method"><div class="name">log_event(event)</div><div class="desc">Append MissionEvent to mission_log.jsonl</div></div>
+      <div class="method"><div class="name">get(key, default)</div><div class="desc">Accessor for state keys</div></div>
+      <div class="method"><div class="name">all()</div><div class="desc">Return full state dict</div></div>
+      <div class="method"><div class="name">clear()</div><div class="desc">Reset state to idle</div></div>
+    </div>
+    <div class="card accent-purple">
+      <h3><span class="file-tag">environment_memory.py</span> EnvironmentMemory</h3>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:8px">Waypoints, obstacles, no-fly zones</p>
+      <div class="method"><div class="name">add_waypoint(name, lat, lon, alt)</div><div class="desc">Store named waypoint to environment.json</div></div>
+      <div class="method"><div class="name">get_waypoint(name)</div><div class="desc">Retrieve stored waypoint</div></div>
+      <div class="method"><div class="name">all_waypoints()</div><div class="desc">Return all waypoints dict</div></div>
+      <div class="method"><div class="name">remove_waypoint(name)</div><div class="desc">Delete waypoint</div></div>
+      <div class="method"><div class="name">add_obstacle(lat, lon, r, desc)</div><div class="desc">Add obstacle marker with radius</div></div>
+      <div class="method"><div class="name">clear_obstacles()</div><div class="desc">Clear all obstacles</div></div>
+      <div class="method"><div class="name">add_no_fly_zone(lat, lon, r, label)</div><div class="desc">Add no-fly zone with radius</div></div>
+      <div class="method"><div class="name">no_fly_zones()</div><div class="desc">Return no-fly zones list</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════ WORKFLOWS ═══════════════════════════════ -->
+<section id="workflows">
+  <h2><span class="dot" style="background:var(--yellow)"></span>Workflows <span class="file-tag">workflows/</span></h2>
+  <p style="color:var(--muted);margin-bottom:14px;font-size:12px">Multi-step mission sequences executed by Planner.run_workflow()</p>
+  <div class="grid grid-3">
+    <div class="card accent-yellow">
+      <h3><span class="file-tag">startup.py</span></h3>
+      <div style="font-size:12px;color:var(--muted)"><strong style="color:var(--yellow)">run_startup()</strong></div>
+      <ol style="margin-top:8px;margin-left:16px;font-size:12px;color:var(--muted);line-height:1.8">
+        <li>connect_drone</li>
+        <li>get_current_state</li>
+        <li>get_telemetry</li>
+        <li>get_battery</li>
+        <li>set_mode(GUIDED)</li>
+      </ol>
+    </div>
+    <div class="card accent-yellow">
+      <h3><span class="file-tag">takeoff.py</span></h3>
+      <div style="font-size:12px;color:var(--muted)"><strong style="color:var(--yellow)">run_takeoff(altitude)</strong></div>
+      <ol style="margin-top:8px;margin-left:16px;font-size:12px;color:var(--muted);line-height:1.8">
+        <li>set_mode(GUIDED)</li>
+        <li>arm_drone</li>
+        <li>takeoff(altitude)</li>
+        <li>wait_altitude(altitude)</li>
+      </ol>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">Handles wait/retry/failsafe decisions</div>
+    </div>
+    <div class="card accent-yellow">
+      <h3><span class="file-tag">navigation.py</span></h3>
+      <div style="font-size:12px;color:var(--muted)"><strong style="color:var(--yellow)">run_navigation(lat, lon, alt, speed, yaw)</strong></div>
+      <ol style="margin-top:8px;margin-left:16px;font-size:12px;color:var(--muted);line-height:1.8">
+        <li>set_speed(speed_ms)</li>
+        <li>set_yaw(yaw_deg)</li>
+        <li>goto_position(lat, lon, alt)</li>
+        <li>wait_arrival()</li>
+      </ol>
+    </div>
+    <div class="card accent-yellow">
+      <h3><span class="file-tag">landing.py</span></h3>
+      <div style="font-size:12px;color:var(--muted)"><strong style="color:var(--yellow)">run_landing()</strong></div>
+      <ol style="margin-top:8px;margin-left:16px;font-size:12px;color:var(--muted);line-height:1.8">
+        <li>land()</li>
+        <li>wait 2s</li>
+        <li>disarm_drone()</li>
+      </ol>
+    </div>
+    <div class="card accent-yellow">
+      <h3><span class="file-tag">return_home.py</span></h3>
+      <div style="font-size:12px;color:var(--muted)"><strong style="color:var(--yellow)">run_return_home()</strong></div>
+      <ol style="margin-top:8px;margin-left:16px;font-size:12px;color:var(--muted);line-height:1.8">
+        <li>get_battery()</li>
+        <li>if critical → land()</li>
+        <li>else → return_to_launch()</li>
+        <li>→ wait_arrival()</li>
+        <li>→ land()</li>
+      </ol>
+    </div>
+    <div class="card accent-red">
+      <h3><span class="file-tag">emergency.py</span></h3>
+      <div style="font-size:12px;color:var(--muted)"><strong style="color:var(--red)">run_emergency(reason)</strong></div>
+      <ol style="margin-top:8px;margin-left:16px;font-size:12px;color:var(--muted);line-height:1.8">
+        <li>try set_mode(RTL)</li>
+        <li>land()</li>
+        <li>wait 3s</li>
+        <li>disarm_drone()</li>
+      </ol>
+      <div style="font-size:11px;color:var(--red);margin-top:6px">Never raises · uses _try() with short timeouts</div>
+    </div>
+    <div class="card accent-yellow">
+      <h3><span class="file-tag">inspection.py</span></h3>
+      <div style="font-size:12px;color:var(--muted)"><strong style="color:var(--yellow)">run_inspection(hold_s, yaw)</strong></div>
+      <ol style="margin-top:8px;margin-left:16px;font-size:12px;color:var(--muted);line-height:1.8">
+        <li>wait_time(hold_seconds)</li>
+        <li>set_yaw(yaw_deg)</li>
+        <li>get_position_str()</li>
+        <li>get_telemetry()</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════ SCHEMAS ═══════════════════════════════ -->
+<section id="schemas">
+  <h2><span class="dot" style="background:var(--accent)"></span>Data Schemas <span class="file-tag">schemas.py</span></h2>
+  <div class="grid grid-2">
+    <div class="card accent-blue">
+      <h3>ToolResponse @dataclass</h3>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:8px">Standard normalized response from every tool execution</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:12px">
+        <div><code>ok: bool</code> <span style="color:var(--muted)">success flag</span></div>
+        <div><code>tool: str</code> <span style="color:var(--muted)">tool name</span></div>
+        <div><code>state: str</code> <span style="color:var(--muted)">mission state</span></div>
+        <div><code>data: dict</code> <span style="color:var(--muted)">result data</span></div>
+        <div><code>error: Optional[str]</code> <span style="color:var(--muted)">error msg</span></div>
+        <div><code>next_action: Optional[str]</code></div>
+        <div><code>wait: Optional[WaitInstruction]</code></div>
+        <div><code>confidence: float</code> <span style="color:var(--muted)">default 1.0</span></div>
+        <div><code>timestamp: float</code> <span style="color:var(--muted)">unix time</span></div>
+      </div>
+      <div style="margin-top:8px;font-size:11px;color:var(--teal)">Factories: ToolResponse.success() · ToolResponse.failure()</div>
+    </div>
+    <div class="grid" style="gap:12px">
+      <div class="card accent-blue">
+        <h3>WaitInstruction @dataclass</h3>
+        <div style="font-size:12px"><code>seconds: float</code> · <code>reason: str</code> · <code>to_dict()</code></div>
+      </div>
+      <div class="card accent-blue">
+        <h3>MissionEvent @dataclass</h3>
+        <div style="font-size:12px;color:var(--muted)">
+          <code>event_type</code>: "tool_call" | "state_change" | "error" | "plan_decision"<br>
+          <code>tool</code> · <code>state</code> · <code>detail</code> · <code>timestamp</code>
+        </div>
+      </div>
+      <div class="card accent-red">
+        <h3>ErrorSchema @dataclass</h3>
+        <div style="font-size:12px;color:var(--muted)">
+          <code>code: str</code> error code<br>
+          <code>message: str</code> human-readable<br>
+          <code>retryable: bool</code> can retry?<br>
+          <code>context: dict</code> additional info
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════ CONFIG ═══════════════════════════════ -->
+<section id="config">
+  <h2><span class="dot" style="background:var(--muted)"></span>Configuration <span class="file-tag">config.py</span></h2>
+  <div class="grid grid-2">
+    <div class="card accent-blue">
+      <h3>Environment Variables</h3>
+      <div class="threshold"><div class="key">GEMINI_API_KEY</div><div class="val">required</div><div class="desc">Google Gemini API key</div></div>
+      <div class="threshold"><div class="key">DRONE_BACKEND</div><div class="val">"sim" | "mavlink"</div><div class="desc">default: sim</div></div>
+      <div class="threshold"><div class="key">MAVLINK_URI</div><div class="val">udp:127.0.0.1:14550</div><div class="desc">MAVLink connection string</div></div>
+    </div>
+    <div class="card accent-yellow">
+      <h3>Safety Thresholds</h3>
+      <div class="threshold"><div class="key">BATTERY_CRITICAL_PCT</div><div class="val">15%</div><div class="desc">→ failsafe</div></div>
+      <div class="threshold"><div class="key">BATTERY_LOW_PCT</div><div class="val">25%</div><div class="desc">→ warn</div></div>
+      <div class="threshold"><div class="key">ALTITUDE_CEILING_M</div><div class="val">120 m</div><div class="desc">hard ceiling</div></div>
+      <div class="threshold"><div class="key">MAX_SPEED_MS</div><div class="val">15 m/s</div><div class="desc">hard limit</div></div>
+      <div class="threshold"><div class="key">TELEMETRY_STALE_S</div><div class="val">5 s</div><div class="desc">→ wait</div></div>
+      <div class="threshold"><div class="key">TELEMETRY_EMERGENCY_S</div><div class="val">10 s</div><div class="desc">→ emergency failsafe</div></div>
+      <div class="threshold"><div class="key">MAX_RETRY_COUNT</div><div class="val">3</div><div class="desc">per tool</div></div>
+      <div class="threshold"><div class="key">TOOL_TIMEOUT_SEC</div><div class="val">10 s</div><div class="desc">per execution</div></div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:12px">
+    <h3>Config domains</h3>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;margin-top:8px">
+      <code>API</code><code>Audio rates</code><code>Backend</code><code>Safety limits</code><code>Planner</code><code>State persistence</code><code>Voice</code><code>Vision</code>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════ TESTS ═══════════════════════════════ -->
+<section id="tests">
+  <h2><span class="dot" style="background:var(--green)"></span>Test Suite <span class="file-tag">tests/</span></h2>
+  <p style="color:var(--muted);margin-bottom:14px;font-size:12px">Framework: pytest + pytest-asyncio · 253 tests total</p>
+  <div class="card accent-green">
+    <div class="test-row">
+      <div class="test-count">16</div>
+      <div style="font-family:monospace;font-size:12px;color:var(--yellow);min-width:230px">test_state_machine.py</div>
+      <div style="font-size:12px;color:var(--muted)">Initial state · legal/illegal transitions · full flight sequence · force_failsafe · history · to_dict · is_airborne</div>
+    </div>
+    <div class="test-row">
+      <div class="test-count">10</div>
+      <div style="font-family:monospace;font-size:12px;color:var(--yellow);min-width:230px">test_schemas.py</div>
+      <div style="font-size:12px;color:var(--muted)">ToolResponse success/failure shapes · serialization · WaitInstruction · MissionEvent · ErrorSchema</div>
+    </div>
+    <div class="test-row">
+      <div class="test-count">33</div>
+      <div style="font-family:monospace;font-size:12px;color:var(--yellow);min-width:230px">test_tools.py</div>
+      <div style="font-size:12px;color:var(--muted)">SimAdapter: connection · telemetry · arming · flight commands · wait tools · distance calculation · error handling</div>
+    </div>
+    <div class="test-row">
+      <div class="test-count">12</div>
+      <div style="font-family:monospace;font-size:12px;color:var(--yellow);min-width:230px">test_workflows.py</div>
+      <div style="font-size:12px;color:var(--muted)">Startup success/failure · takeoff · navigation · return home (normal + battery critical) · emergency</div>
+    </div>
+    <div class="test-row">
+      <div class="test-count">95</div>
+      <div style="font-family:monospace;font-size:12px;color:var(--yellow);min-width:230px">test_localization.py</div>
+      <div style="font-size:12px;color:var(--muted)">camera_to_frd (12) · frd_to_ned (7) · ned_to_global (5) · local_frame_summary (5) · sector_to_frd (9) · PoseCache (13) · Localizer (14) · pure math, no hardware</div>
+    </div>
+    <div class="test-row">
+      <div class="test-count">29</div>
+      <div style="font-family:monospace;font-size:12px;color:var(--yellow);min-width:230px">test_failures.py</div>
+      <div style="font-size:12px;color:var(--muted)">Planner decisions (failsafe · retry · wait · abort · replan) · wait timing · SafetyPolicy (battery · altitude · speed · telemetry · retry · command legality)</div>
+    </div>
+    <div class="test-row">
+      <div class="test-count">58</div>
+      <div style="font-family:monospace;font-size:12px;color:var(--yellow);min-width:230px">test_vision.py</div>
+      <div style="font-size:12px;color:var(--muted)">label_name · analyze_depth_grid (grid cells · coverage · invalid pixels) · check_landing_zone (flat · uneven · insufficient) · VisionTool mocked (obstacle · depth · objects)</div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<script>
+function show(id, el) {
+  document.querySelectorAll('section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  el.classList.add('active');
+  return false;
+}
+</script>
+</body>
+</html>
