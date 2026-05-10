@@ -122,6 +122,19 @@ class SafetyPolicy:
             )
         return None
 
+    def oracle_context_data(self, tool_name: str) -> dict:
+        """Return current safety state for oracle context building."""
+        tel_age = (
+            0.0 if self._last_tel_time == 0.0
+            else time.time() - self._last_tel_time
+        )
+        return {
+            "battery_pct":       self._last_battery,
+            "altitude_m":        self._last_altitude,
+            "telemetry_age_sec": tel_age,
+            "retry_count":       self._retry_counts.get(tool_name, 0),
+        }
+
     # ── Retry management ──────────────────────────────────────────────────────
 
     def increment_retry(self, tool: str) -> int:

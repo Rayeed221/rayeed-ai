@@ -48,6 +48,8 @@ HIGH_VALUE_TOOLS = {
     "arm_drone", "wait_arrival", "wait_altitude", "land",
 }
 
+UNRECOVERABLE_ERRORS = {"ALTITUDE_CEILING", "SPEED_EXCEEDED", "ILLEGAL_COMMAND", "UNKNOWN_TOOL"}
+
 
 # ── ThinkingDecision ───────────────────────────────────────────────────────────
 
@@ -267,6 +269,18 @@ def _oracle_to_plan(td: ThinkingDecision) -> Optional["PlanDecision"]:
     }.get(td.decision)
 
 
+def build_oracle_context(tool_name: str, resp, sm, safety) -> dict:
+    """Shared oracle context builder used by planner and workflows."""
+    return {
+        "tool":    tool_name,
+        "ok":      resp.ok,
+        "error":   resp.error,
+        "state":   resp.state,
+        "airborne": sm.is_airborne(),
+        **safety.oracle_context_data(tool_name),
+    }
+
+
 # ── PlanDecision ───────────────────────────────────────────────────────────────
 
 class PlanDecision(str, Enum):
@@ -292,7 +306,7 @@ class Planner:
 
     # ── Core decision engine ──────────────────────────────────────────────────
 
-    def decide(self, response: ToolResponse) -> PlanDecision:
+    async def decide(self, response: ToolResponse) -> PlanDecision:
         """
         Three-phase decision pipeline:
           Phase 1 — Hard safety gates (deterministic, always executes)
@@ -317,10 +331,10 @@ class Planner:
                 return PlanDecision.ABORT
             # fall through to oracle for ambiguous failures
 
-        # ── Phase 2: Oracle deliberation ─────────────────────────────────────
+        # ── Phase 2: Oracle deliberation (non-blocking) ───────────────────────
         if self._should_invoke_oracle(response):
-            oracle_ctx    = self._build_oracle_context(response)
-            td: ThinkingDecision = self._oracle.deliberate(oracle_ctx)
+            oracle_ctx = build_oracle_context(response.tool, response, self._sm, self._safety)
+            td: ThinkingDecision = await asyncio.to_thread(self._oracle.deliberate, oracle_ctx)
 
             logger.info(
                 f"[PLANNER:ORACLE] {response.tool} → {td.decision} "
@@ -368,28 +382,9 @@ class Planner:
             or self._sm.is_airborne()
         )
 
-    def _build_oracle_context(self, response: ToolResponse) -> dict:
-        tel_age = (
-            0.0
-            if self._safety._last_tel_time == 0.0
-            else time.time() - self._safety._last_tel_time
-        )
-        return {
-            "tool":              response.tool,
-            "ok":                response.ok,
-            "error":             response.error,
-            "state":             response.state,
-            "battery_pct":       self._safety._last_battery,
-            "altitude_m":        self._safety._last_altitude,
-            "telemetry_age_sec": tel_age,
-            "retry_count":       self._safety._retry_counts.get(response.tool, 0),
-            "airborne":          self._sm.is_airborne(),
-        }
-
     @staticmethod
     def _is_unrecoverable(response: ToolResponse) -> bool:
-        UNRECOVERABLE = {"ALTITUDE_CEILING", "SPEED_EXCEEDED", "ILLEGAL_COMMAND", "UNKNOWN_TOOL"}
-        return bool(response.error and any(code in response.error for code in UNRECOVERABLE))
+        return bool(response.error and any(code in response.error for code in UNRECOVERABLE_ERRORS))
 
     # ── Non-blocking wait ─────────────────────────────────────────────────────
 

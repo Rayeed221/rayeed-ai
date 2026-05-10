@@ -5,18 +5,14 @@ Takeoff workflow — sequence:
   3. takeoff(altitude)
   4. wait_altitude(altitude)
 
-Each step is oracle-deliberated before advancing. The oracle thinks between
-every step — even on success — because CONNECTED → ARMED → TAKEOFF are the
-highest-risk state transitions.
-
-If altitude not stable: wait → recheck → retry or failsafe.
+Each step is oracle-deliberated before advancing. CONNECTED → ARMED → TAKEOFF
+are the highest-risk state transitions, so the oracle thinks between every step.
 """
 
 import asyncio
 import logging
-import time
 
-from planner import ThinkingOracle
+from planner import ThinkingOracle, build_oracle_context
 
 logger = logging.getLogger(__name__)
 
@@ -31,26 +27,13 @@ async def _oracle_step(
     Execute one workflow step with oracle deliberation.
     Returns (success: bool, result_data: dict).
     """
+    wait_count = 0
+
     for attempt in range(max_retries + 1):
         resp = await dispatcher.dispatch(tool_name, args)
-
-        tel_age = (
-            0.0 if safety._last_tel_time == 0.0
-            else time.time() - safety._last_tel_time
-        )
-        ctx = {
-            "tool":              tool_name,
-            "ok":                resp.ok,
-            "error":             resp.error,
-            "state":             resp.state,
-            "battery_pct":       safety._last_battery,
-            "altitude_m":        safety._last_altitude,
-            "telemetry_age_sec": tel_age,
-            "retry_count":       attempt,
-            "airborne":          sm.is_airborne(),
-        }
-
-        td = await asyncio.to_thread(_oracle.deliberate, ctx)
+        ctx  = build_oracle_context(tool_name, resp, sm, safety)
+        ctx["retry_count"] = attempt
+        td   = await asyncio.to_thread(_oracle.deliberate, ctx)
 
         logger.info(
             f"[TAKEOFF:ORACLE] {tool_name} attempt={attempt} "
@@ -71,10 +54,11 @@ async def _oracle_step(
             logger.warning(f"[TAKEOFF] Oracle REPLAN during {tool_name} — aborting takeoff")
             return False, {}
 
-        if td.decision == "WAIT":
+        if td.decision == "WAIT" and wait_count < max_retries:
             wait_s = td.wait_sec or 1.0
             logger.info(f"[TAKEOFF] Oracle WAIT {wait_s}s — {td.reason}")
             await asyncio.sleep(wait_s)
+            wait_count += 1
             continue
 
         if td.decision == "RETRY" and attempt < max_retries:
@@ -82,7 +66,6 @@ async def _oracle_step(
             await asyncio.sleep(0.5 * (attempt + 1))
             continue
 
-        # CONTINUE — proceed
         return resp.ok, resp.data
 
     logger.error(f"[TAKEOFF] {tool_name} exceeded max retries")

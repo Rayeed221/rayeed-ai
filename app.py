@@ -274,7 +274,7 @@ class DroneAI:
                             tool_resp: ToolResponse = await self.dispatcher.dispatch(fc.name, args)
 
                             # Planner authority: may override LLM next_action
-                            decision = self.planner.decide(tool_resp)
+                            decision = await self.planner.decide(tool_resp)
                             logger.info(f"[PLANNER] {fc.name} → {decision.value}")
 
                             if decision == PlanDecision.WAIT and tool_resp.wait:

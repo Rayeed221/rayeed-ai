@@ -11,9 +11,8 @@ re-reads position and retries once with oracle re-check.
 
 import asyncio
 import logging
-import time
 
-from planner import ThinkingOracle
+from planner import ThinkingOracle, build_oracle_context
 
 logger = logging.getLogger(__name__)
 
@@ -21,20 +20,9 @@ _oracle = ThinkingOracle()
 
 
 async def _deliberate(tool_name: str, resp, sm, safety) -> object:
-    """Build context and run oracle deliberation asynchronously."""
-    tel_age = 0.0 if safety._last_tel_time == 0.0 else time.time() - safety._last_tel_time
-    ctx = {
-        "tool":              tool_name,
-        "ok":                resp.ok,
-        "error":             resp.error,
-        "state":             resp.state,
-        "battery_pct":       safety._last_battery,
-        "altitude_m":        safety._last_altitude,
-        "telemetry_age_sec": tel_age,
-        "retry_count":       safety._retry_counts.get(tool_name, 0),
-        "airborne":          sm.is_airborne(),
-    }
-    td = await asyncio.to_thread(_oracle.deliberate, ctx)
+    """Run oracle deliberation asynchronously."""
+    ctx = build_oracle_context(tool_name, resp, sm, safety)
+    td  = await asyncio.to_thread(_oracle.deliberate, ctx)
     logger.info(
         f"[NAV:ORACLE] {tool_name} → {td.decision} | {td.reason} "
         f"| conf={td.confidence:.2f} | {td.latency_ms:.0f}ms"
