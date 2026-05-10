@@ -1,8 +1,22 @@
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ─── API ────────────────────────────────────────────────────────────────────
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyBvXdZ0fqCVW1W3jY5dbH6D5GetLjMGQWg")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+GROQ_API_KEY   = os.environ.get("GROQ_API_KEY")
+OLLAMA_API_KEY = os.environ.get("OLLAMA_API_KEY")
+
 MODEL = "models/gemini-3.1-flash-live-preview"
+
+# ─── Ollama ──────────────────────────────────────────────────────────────────
+OLLAMA_BASE_URL   = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_MODEL      = os.environ.get("OLLAMA_MODEL", "qwen3:latest")
+MAVLINK_CONNECTION = os.environ.get("MAVLINK_CONNECTION", "tcp:127.0.0.1:5760")
+
+# ─── Groq ────────────────────────────────────────────────────────────────────
+GROQ_MODEL        = os.environ.get("GROQ_MODEL", "qwen/qwen3-32b")
 
 # ─── Audio ──────────────────────────────────────────────────────────────────
 SEND_SAMPLE_RATE    = 16000
