@@ -1,7 +1,7 @@
 import os
 
 # ─── API ────────────────────────────────────────────────────────────────────
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyCCIKOChwt4ywQPOdTf1iRbrh_547Ir1Mo")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyBvXdZ0fqCVW1W3jY5dbH6D5GetLjMGQWg")
 MODEL = "models/gemini-3.1-flash-live-preview"
 
 # ─── Audio ──────────────────────────────────────────────────────────────────

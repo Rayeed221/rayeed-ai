@@ -11,7 +11,7 @@ from pymavlink import mavutil
 
 MAVLINK_CONNECTION = os.environ.get("MAVLINK_CONNECTION", "tcp:127.0.0.1:5760")
 # OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3:latest")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3:latest")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.5:2b")
 
 _mav: mavutil.mavfile | None = None
 
@@ -422,9 +422,9 @@ def run_agent(mission: str, max_turns: int = 10) -> None:
             model=OLLAMA_MODEL,
             messages=messages,
             tools=TOOLS,
-            think=False,
+            think=True,
             # think=True,
-            options={"temperature": 1, "max_tokens":512, "n_ctx": 1024, "seed": 36},
+            options={"temperature": 0.1, "max_tokens":512, "n_ctx": 1024, "seed": 36},
             stream=True,
             
         )
