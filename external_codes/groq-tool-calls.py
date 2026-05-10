@@ -12,7 +12,7 @@ DRONE_TOOLS = [
         "type": "function",
         "function": {
             "name": "arm",
-            "description": "Arm the motors. Requires GUIDED mode first.",
+            "description": "Arm motors. GUIDED mode required first.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -20,7 +20,7 @@ DRONE_TOOLS = [
         "type": "function",
         "function": {
             "name": "disarm",
-            "description": "Disarm the motors. Only when on the ground after landing.",
+            "description": "Disarm motors. Ground only.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -28,21 +28,12 @@ DRONE_TOOLS = [
         "type": "function",
         "function": {
             "name": "set_mode",
-            "description": (
-                "Set ArduCopter flight mode. "
-                "GUIDED: autonomous control (required before arm/navigate). "
-                "RTL: return to launch. LAND: land in place. "
-                "LOITER: hold position. POSHOLD: manual hold. STABILIZE: manual."
-            ),
+            "description": "Set flight mode. Use GUIDED before arm/navigate, RTL to return home, LAND to land.",
             "parameters": {
                 "type": "object",
                 "required": ["mode"],
                 "properties": {
-                    "mode": {
-                        "type": "string",
-                        "enum": ["GUIDED", "RTL", "LAND", "LOITER", "POSHOLD", "STABILIZE"],
-                        "description": "Target flight mode.",
-                    },
+                    "mode": {"type": "string", "enum": ["GUIDED", "RTL", "LAND", "LOITER", "POSHOLD", "STABILIZE"]},
                 },
             },
         },
@@ -51,18 +42,15 @@ DRONE_TOOLS = [
         "type": "function",
         "function": {
             "name": "goto_gps",
-            "description": (
-                "Fly to an absolute GPS coordinate. "
-                "Requires GUIDED mode and armed. alt is meters above home."
-            ),
+            "description": "Fly to GPS coordinate. alt = meters above home.",
             "parameters": {
                 "type": "object",
                 "required": ["lat", "lon", "alt"],
                 "properties": {
-                    "lat":  {"type": "number", "description": "Latitude in decimal degrees."},
-                    "lon":  {"type": "number", "description": "Longitude in decimal degrees."},
-                    "alt":  {"type": "number", "description": "Altitude in meters above home."},
-                    "yaw":  {"type": "number", "description": "Heading 0-359 degrees (optional)."},
+                    "lat": {"type": "number"},
+                    "lon": {"type": "number"},
+                    "alt": {"type": "number"},
+                    "yaw": {"type": "number", "description": "Heading degrees (optional)."},
                 },
             },
         },
@@ -71,18 +59,15 @@ DRONE_TOOLS = [
         "type": "function",
         "function": {
             "name": "goto_local",
-            "description": (
-                "Fly to NED position relative to origin (arming point). "
-                "x=North, y=East, z=Down. Use negative z to climb (z=-10 = 10m altitude)."
-            ),
+            "description": "Fly to NED offset from origin. x=North, y=East, z=Down (negative z = climb).",
             "parameters": {
                 "type": "object",
                 "required": ["x", "y", "z"],
                 "properties": {
-                    "x": {"type": "number", "description": "North offset in meters."},
-                    "y": {"type": "number", "description": "East offset in meters."},
-                    "z": {"type": "number", "description": "Down offset in meters (negative = up)."},
-                    "yaw": {"type": "number", "description": "Heading 0-359 degrees (optional)."},
+                    "x": {"type": "number"},
+                    "y": {"type": "number"},
+                    "z": {"type": "number"},
+                    "yaw": {"type": "number", "description": "Heading degrees (optional)."},
                 },
             },
         },
@@ -91,18 +76,14 @@ DRONE_TOOLS = [
         "type": "function",
         "function": {
             "name": "move_body",
-            "description": (
-                "Move relative to current position in body frame. "
-                "dx=forward, dy=right, dz=down (negative = backward/left/up). "
-                "Useful for fine adjustments and obstacle avoidance."
-            ),
+            "description": "Move relative to current position. dx=fwd, dy=right, dz=down (neg=up).",
             "parameters": {
                 "type": "object",
                 "required": ["dx", "dy", "dz"],
                 "properties": {
-                    "dx": {"type": "number", "description": "Forward offset in meters (negative = backward)."},
-                    "dy": {"type": "number", "description": "Right offset in meters (negative = left)."},
-                    "dz": {"type": "number", "description": "Down offset in meters (negative = up)."},
+                    "dx": {"type": "number"},
+                    "dy": {"type": "number"},
+                    "dz": {"type": "number"},
                 },
             },
         },
@@ -111,11 +92,7 @@ DRONE_TOOLS = [
         "type": "function",
         "function": {
             "name": "observe",
-            "description": (
-                "Read drone telemetry. "
-                "Always call observe(['battery','gps']) before arm or navigate. "
-                "Call observe(['local_vio']) after navigation to confirm position."
-            ),
+            "description": "Read telemetry. Call with ['battery','gps'] before arm/navigate; ['local_vio'] after navigate.",
             "parameters": {
                 "type": "object",
                 "required": ["data"],
@@ -126,7 +103,7 @@ DRONE_TOOLS = [
                             "type": "string",
                             "enum": ["battery", "gps", "heading", "airspeed", "local_vio", "depth"],
                         },
-                        "description": "List of sensors to read.",
+                        "description": "Sensors to read.",
                     },
                 },
             },
@@ -136,111 +113,40 @@ DRONE_TOOLS = [
 
 load_dotenv()
 
-DRONE_SYSTEM_PROMPT = """You are a drone mission planner. Your job is to translate a natural-language mission description into a precise, sequential Python mission script using ONLY the drone functions listed below.
+DRONE_SYSTEM_PROMPT = """You are a drone mission planner. Translate the mission into sequential Python code blocks.
 
-## Output Rules
+Rules:
+- Output ONLY ```python blocks with a `### Step N: Name` heading before each.
+- No imports, no helpers, no prose. Use keyword args. No time.sleep/print/math.
+- After every state-changing call add get_telemetry() on the next line.
+- Call wait_altitude() after takeoff() before goto_position().
+- End with land() or return_to_launch(), then disarm_drone().
 
-1. Output ONLY Python code blocks — no prose, no explanation outside the blocks.
-2. Each logical phase of the mission is a SEPARATE ```python block with a markdown heading above it that names the phase.
-   Heading format: `### <Step N>: <Phase Name>`
-3. Every block must be self-contained and runnable in order. Assume each previous block already executed successfully.
-4. Do NOT define helper functions, classes, or imports. The executor provides all functions directly.
-5. Use only the function names listed below — no other Python APIs (no time.sleep, no print, no math, etc.).
-6. For each function call, pass arguments as keyword arguments matching the parameter names exactly.
-7. After every state-changing call (set_mode, arm_drone, takeoff, goto_position, etc.) always call get_telemetry() on the next line to confirm the new state.
-8. If a mission requires waiting for altitude, always call wait_altitude() after takeoff() before any goto_position().
-9. Always end the mission with either land() or return_to_launch(), then disarm_drone().
+Functions:
+  connect_drone()
+  get_telemetry()
+  get_battery()
+  get_position()
+  set_mode(mode)           # GUIDED | LOITER | RTL | LAND | STABILIZE | POSHOLD
+  arm_drone()
+  disarm_drone()
+  takeoff(altitude)
+  wait_altitude(target_altitude, tolerance=1.0, timeout=30)
+  goto_position(latitude, longitude, altitude)
+  set_yaw(heading, relative=False)
+  set_speed(speed, speed_type="groundspeed")
+  get_distance_to(target_lat, target_lon)
+  land()
+  return_to_launch()
 
-## Available Functions
-
-connect_drone()
-    Connect to the drone. Must be the very first call.
-
-get_telemetry()
-    Returns full state: position, attitude, battery, GPS, mode, armed status.
-
-get_position()
-    Returns lat, lon, alt, heading.
-
-get_battery()
-    Returns voltage, current, remaining_percent.
-
-set_mode(mode: str)
-    mode: "STABILIZE" | "GUIDED" | "LOITER" | "RTL" | "LAND" | "AUTO" | "ALT_HOLD" | "POSHOLD"
-    Must set GUIDED before arming/takeoff/goto.
-
-arm_drone()
-    Arm motors. Requires GUIDED or STABILIZE mode.
-
-disarm_drone()
-    Disarm motors. Only when on the ground.
-
-takeoff(altitude: float)
-    altitude: meters above home. Requires armed + GUIDED mode.
-
-wait_altitude(target_altitude: float, tolerance: float = 1.0, timeout: float = 30)
-    Block until drone reaches target_altitude within tolerance.
-
-goto_position(latitude: float, longitude: float, altitude: float)
-    Fly to GPS coordinate. Requires GUIDED mode and airborne.
-
-set_yaw(heading: float, relative: bool = False)
-    heading: 0-360 degrees (0=North). relative=True means offset from current yaw.
-
-set_speed(speed: float, speed_type: str = "groundspeed")
-    speed_type: "groundspeed" | "airspeed"
-
-get_distance_to(target_lat: float, target_lon: float)
-    Returns distance in meters to target coordinate.
-
-land()
-    Land at current position.
-
-return_to_launch()
-    RTL — fly back to home and land.
-
-## Example Output Format
-
-### Step 1: Connect and Preflight Check
-```python
-connect_drone()
-get_telemetry()
-get_battery()
-```
-
-### Step 2: Arm and Takeoff
-```python
-set_mode(mode="GUIDED")
-get_telemetry()
-arm_drone()
-get_telemetry()
-takeoff(altitude=15)
-wait_altitude(target_altitude=15, tolerance=1.0, timeout=30)
-get_telemetry()
-```
-
-### Step 3: Navigate to Waypoint
-```python
-set_speed(speed=5)
-goto_position(latitude=-35.3632621, longitude=149.1652374, altitude=15)
-get_telemetry()
-```
-
-### Step 4: Land and Disarm
-```python
-land()
-get_telemetry()
-disarm_drone()
-```
-
-Now generate the mission plan for the following request:"""
+Generate the mission plan:"""
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Generate text using Qwen3 via Groq API")
     parser.add_argument("prompt", nargs="?", help="The prompt to send to the model")
     parser.add_argument("-m", "--model", default="qwen/qwen3-32b", help="Model to use (default: qwen/qwen3-32b)")
     parser.add_argument("-t", "--temperature", type=float, default=1.0, help="Temperature (default: 1.0)")
-    parser.add_argument("--max-tokens", type=int, default=5012, help="Max completion tokens (default: 5012)")
+    parser.add_argument("--max-tokens", type=int, default=1024, help="Max completion tokens (default: 1024)")
     parser.add_argument("-r", "--reasoning", default="default", choices=["default", "none", "low", "high"], help="Reasoning effort (default: default)")
     parser.add_argument("--no-log", action="store_true", help="Disable saving to log file")
     parser.add_argument("--drone", action="store_true", help="Use drone mission planner system prompt")
@@ -291,6 +197,8 @@ def main():
         messages.append({"role": "system", "content": DRONE_SYSTEM_PROMPT})
     messages.append({"role": "user", "content": args.prompt})
 
+    tool_kwargs = {"tools": DRONE_TOOLS, "tool_choice": "auto"} if args.drone else {}
+
     completion = client.chat.completions.create(
         model=args.model,
         messages=messages,
@@ -300,8 +208,7 @@ def main():
         top_p=1,
         stream=True,
         stop=None,
-        tools=DRONE_TOOLS if args.drone else None,
-        tool_choice="auto" if args.drone else None,
+        **tool_kwargs,
     )
 
     think_content = ""
