@@ -7,6 +7,133 @@ from pathlib import Path
 from dotenv import load_dotenv
 import os
 
+DRONE_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "arm",
+            "description": "Arm the motors. Requires GUIDED mode first.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "disarm",
+            "description": "Disarm the motors. Only when on the ground after landing.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_mode",
+            "description": (
+                "Set ArduCopter flight mode. "
+                "GUIDED: autonomous control (required before arm/navigate). "
+                "RTL: return to launch. LAND: land in place. "
+                "LOITER: hold position. POSHOLD: manual hold. STABILIZE: manual."
+            ),
+            "parameters": {
+                "type": "object",
+                "required": ["mode"],
+                "properties": {
+                    "mode": {
+                        "type": "string",
+                        "enum": ["GUIDED", "RTL", "LAND", "LOITER", "POSHOLD", "STABILIZE"],
+                        "description": "Target flight mode.",
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "goto_gps",
+            "description": (
+                "Fly to an absolute GPS coordinate. "
+                "Requires GUIDED mode and armed. alt is meters above home."
+            ),
+            "parameters": {
+                "type": "object",
+                "required": ["lat", "lon", "alt"],
+                "properties": {
+                    "lat":  {"type": "number", "description": "Latitude in decimal degrees."},
+                    "lon":  {"type": "number", "description": "Longitude in decimal degrees."},
+                    "alt":  {"type": "number", "description": "Altitude in meters above home."},
+                    "yaw":  {"type": "number", "description": "Heading 0-359 degrees (optional)."},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "goto_local",
+            "description": (
+                "Fly to NED position relative to origin (arming point). "
+                "x=North, y=East, z=Down. Use negative z to climb (z=-10 = 10m altitude)."
+            ),
+            "parameters": {
+                "type": "object",
+                "required": ["x", "y", "z"],
+                "properties": {
+                    "x": {"type": "number", "description": "North offset in meters."},
+                    "y": {"type": "number", "description": "East offset in meters."},
+                    "z": {"type": "number", "description": "Down offset in meters (negative = up)."},
+                    "yaw": {"type": "number", "description": "Heading 0-359 degrees (optional)."},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "move_body",
+            "description": (
+                "Move relative to current position in body frame. "
+                "dx=forward, dy=right, dz=down (negative = backward/left/up). "
+                "Useful for fine adjustments and obstacle avoidance."
+            ),
+            "parameters": {
+                "type": "object",
+                "required": ["dx", "dy", "dz"],
+                "properties": {
+                    "dx": {"type": "number", "description": "Forward offset in meters (negative = backward)."},
+                    "dy": {"type": "number", "description": "Right offset in meters (negative = left)."},
+                    "dz": {"type": "number", "description": "Down offset in meters (negative = up)."},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "observe",
+            "description": (
+                "Read drone telemetry. "
+                "Always call observe(['battery','gps']) before arm or navigate. "
+                "Call observe(['local_vio']) after navigation to confirm position."
+            ),
+            "parameters": {
+                "type": "object",
+                "required": ["data"],
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": ["battery", "gps", "heading", "airspeed", "local_vio", "depth"],
+                        },
+                        "description": "List of sensors to read.",
+                    },
+                },
+            },
+        },
+    },
+]
+
 load_dotenv()
 
 DRONE_SYSTEM_PROMPT = """You are a drone mission planner. Your job is to translate a natural-language mission description into a precise, sequential Python mission script using ONLY the drone functions listed below.
@@ -172,7 +299,9 @@ def main():
         reasoning_effort=args.reasoning,
         top_p=1,
         stream=True,
-        stop=None
+        stop=None,
+        tools=DRONE_TOOLS if args.drone else None,
+        tool_choice="auto" if args.drone else None,
     )
 
     think_content = ""
