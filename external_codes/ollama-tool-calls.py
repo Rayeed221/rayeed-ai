@@ -234,7 +234,6 @@ def execute_tool(name: str, args: dict) -> str:
 
     elif name == "set_mode":
         return json.dumps(_set_mode(mav, args.get("mode", "")))
-
     elif name == "goto_gps":
         return json.dumps(_goto_gps(
             mav,
