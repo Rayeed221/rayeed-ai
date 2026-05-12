@@ -16,6 +16,7 @@ import asyncio
 import logging
 from typing import Optional
 
+from config import AVOIDANCE_COLLISION_THR
 from schemas import ToolResponse, WaitInstruction
 from state_machine import StateMachine, MissionState, IllegalTransitionError
 from safety_policy import SafetyPolicy
@@ -197,6 +198,16 @@ class ToolDispatcher:
                 state=self._sm.state.value,
                 error=result["error"],
             )
+
+        if tool_name == "vision_obstacle_check":
+            avoidance = self._safety.get_avoidance_state()
+            if avoidance is not None:
+                result["dronet"] = {
+                    "collision_prob": avoidance.collision_prob,
+                    "depth_mm":       avoidance.depth_mm,
+                    "steering":       avoidance.steering,
+                    "active":         avoidance.collision_prob >= AVOIDANCE_COLLISION_THR,
+                }
 
         logger.info(f"[DISPATCH] ✓ {tool_name} (vision) → state={self._sm.state.value}")
         return ToolResponse.success(

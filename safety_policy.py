@@ -1,13 +1,22 @@
 import time
 import logging
+from typing import TYPE_CHECKING, Optional
 
 from config import (
     BATTERY_CRITICAL_PCT, BATTERY_LOW_PCT,
     ALTITUDE_CEILING_M, MAX_SPEED_MS,
     TELEMETRY_STALE_SEC, EMERGENCY_STALE_SEC,
     MAX_RETRY_COUNT,
+    AVOIDANCE_COLLISION_THR, AVOIDANCE_STALE_SEC,
 )
 from schemas import ErrorSchema
+
+if TYPE_CHECKING:
+    from vision.avoidance.dronet_runner import DroNetRunner
+
+# Tools gated by the avoidance layer — position/speed commands conflict with
+# DroNet's autonomous velocity steering in GUIDED mode.
+_AVOIDANCE_GATED: frozenset = frozenset({"goto_position", "set_speed"})
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +34,33 @@ class SafetyPolicy:
         self._last_tel_time:   float = 0.0
         self._last_battery:    float = 100.0
         self._last_altitude:   float = 0.0
+        self._avoidance_runner: Optional["DroNetRunner"] = None
+
+    # ── Avoidance state ───────────────────────────────────────────────────────
+
+    def set_avoidance_runner(self, runner: "DroNetRunner") -> None:
+        self._avoidance_runner = runner
+
+    def get_avoidance_state(self):
+        if self._avoidance_runner is not None:
+            return self._avoidance_runner.get_state()
+        return None
+
+    def check_avoidance(self, tool: str) -> tuple:
+        if tool not in _AVOIDANCE_GATED:
+            return True, ""
+        state = self.get_avoidance_state()
+        if state is None:
+            return True, ""
+        age = time.monotonic() - state.timestamp
+        if age > AVOIDANCE_STALE_SEC:
+            return True, ""
+        if state.collision_prob >= AVOIDANCE_COLLISION_THR:
+            return False, (
+                f"obstacle: prob={state.collision_prob:.2f} "
+                f"depth={state.depth_mm:.0f}mm — avoidance active"
+            )
+        return True, ""
 
     # ── Live value updates ────────────────────────────────────────────────────
 
@@ -185,6 +221,16 @@ class SafetyPolicy:
             err = self.check_speed(args.get("speed_ms", 0))
             if err:
                 return err
+
+        # Avoidance gate — block position/speed commands during active obstacle steering
+        ok, msg = self.check_avoidance(tool_name)
+        if not ok:
+            return ErrorSchema(
+                code="AVOIDANCE_ACTIVE",
+                message=msg,
+                retryable=True,
+                context={"tool": tool_name},
+            )
 
         # Retry limit
         err = self.check_retry_limit(tool_name)

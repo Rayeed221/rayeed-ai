@@ -32,6 +32,7 @@ from config import (
     VISION_ENABLED, VISION_FPS, VISION_DEPTH_MIN_MM, VISION_DEPTH_MAX_MM,
     VISION_BLOB_NAME, VISION_BLOB_SHAVES,
     VISION_CAMERA_PITCH_DEG, VISION_CAMERA_YAW_DEG, VISION_CAMERA_HFOV_DEG,
+    DRONET_MODEL_PATH,
 )
 from schemas import ToolResponse
 from state_machine import StateMachine
@@ -209,6 +210,23 @@ class DroneAI:
         self.mission_mem    = MissionMemory()
         self.env_mem        = EnvironmentMemory()
 
+    # ── DroNet avoidance loop (Layer 2 — autonomous, not LLM-driven) ──────────
+
+    async def _avoidance_loop(self) -> None:
+        """Run DroNet at ~20 Hz as a background task (non-fatal if OAK-D absent)."""
+        try:
+            from vision.avoidance.dronet_runner import DroNetRunner
+        except ImportError as exc:
+            logger.warning(f"[AVOIDANCE] DroNetRunner not available: {exc}")
+            return
+
+        runner = DroNetRunner(
+            mav_connection_string=MAVLINK_URI,
+            model_path=DRONET_MODEL_PATH,
+        )
+        self.safety.set_avoidance_runner(runner)
+        await runner.run()
+
     # ── Send mic PCM to Gemini ─────────────────────────────────────────────────
 
     async def send_audio(self):
@@ -356,9 +374,10 @@ class DroneAI:
 
         # ── Background tasks started before session opens ──────────────────
         background_tasks = [
-            loop.create_task(self.tel_reader.run(),  name="telemetry_reader"),
-            loop.create_task(self.bat_monitor.run(), name="battery_monitor"),
-            loop.create_task(self.pos_monitor.run(), name="position_monitor"),
+            loop.create_task(self.tel_reader.run(),      name="telemetry_reader"),
+            loop.create_task(self.bat_monitor.run(),     name="battery_monitor"),
+            loop.create_task(self.pos_monitor.run(),     name="position_monitor"),
+            loop.create_task(self._avoidance_loop(),     name="avoidance_loop"),
         ]
 
         try:

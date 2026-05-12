@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
+from config import AVOIDANCE_COLLISION_THR, AVOIDANCE_STALE_SEC
 from schemas import ToolResponse, WaitInstruction
 from state_machine import StateMachine, MissionState
 from safety_policy import SafetyPolicy
@@ -303,6 +304,7 @@ class Planner:
         self._wait:       Optional[WaitInstruction] = None
         self._wait_start: Optional[float] = None
         self._aborted     = False
+        self._avoidance_active_since: Optional[float] = None
 
     # ── Core decision engine ──────────────────────────────────────────────────
 
@@ -330,6 +332,23 @@ class Planner:
             if self._is_unrecoverable(response):
                 return PlanDecision.ABORT
             # fall through to oracle for ambiguous failures
+
+        # ── Phase 1b: Avoidance gate (DroNet 20 Hz loop) ─────────────────────
+        avoidance = self._safety.get_avoidance_state()
+        if self._sm.is_airborne() and avoidance is not None:
+            now  = time.monotonic()
+            prob = avoidance.collision_prob
+            age  = now - avoidance.timestamp
+            if prob >= AVOIDANCE_COLLISION_THR and age < AVOIDANCE_STALE_SEC:
+                if self._avoidance_active_since is None:
+                    self._avoidance_active_since = now
+                if now - self._avoidance_active_since > 10.0:
+                    self._avoidance_active_since = None
+                    logger.warning("[PLANNER] Avoidance stuck >10s — replanning")
+                    return PlanDecision.REPLAN
+                return PlanDecision.WAIT
+            else:
+                self._avoidance_active_since = None
 
         # ── Phase 2: Oracle deliberation (non-blocking) ───────────────────────
         if self._should_invoke_oracle(response):

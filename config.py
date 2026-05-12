@@ -53,6 +53,14 @@ VOICE_NAME              = "Sadachbia"
 CONTEXT_TRIGGER_TOKENS  = 104857
 CONTEXT_TARGET_TOKENS   = 52428
 
+# ─── Avoidance (DroNet) ─────────────────────────────────────────────────────
+DRONET_MODEL_PATH       = os.environ.get(
+    "DRONET_MODEL_PATH",
+    "vision/avoidance/dronet_tiny_openvino_2022.1_5shave.blob",
+)
+AVOIDANCE_COLLISION_THR = float(os.environ.get("AVOIDANCE_COLLISION_THR", "0.7"))
+AVOIDANCE_STALE_SEC     = float(os.environ.get("AVOIDANCE_STALE_SEC",     "0.5"))
+
 # ─── Vision (OAK-D Lite / DepthAI v3) ───────────────────────────────────────
 # Set VISION_ENABLED=0 to disable all vision tools (e.g. headless CI runs)
 VISION_ENABLED      = os.environ.get("VISION_ENABLED", "1") == "1"
