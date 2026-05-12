@@ -21,7 +21,6 @@ import asyncio
 import logging
 import traceback
 
-import pyaudio
 from google import genai
 from google.genai import types
 
@@ -163,7 +162,6 @@ LIVE_CONFIG = types.LiveConnectConfig(
 
 class DroneAI:
     def __init__(self):
-        self.pya            = pyaudio.PyAudio()
         self.session        = None
 
         # Queues
@@ -198,8 +196,8 @@ class DroneAI:
 
         # ── Layer 1: Audio interface ─────────────────────────────────────────
         self.turn_manager   = TurnManager()
-        self.mic_capture    = MicCapture(self.pya, self.mic_queue)
-        self.playback       = Playback(self.pya, self.audio_in_queue)
+        self.mic_capture    = MicCapture(self.mic_queue)
+        self.playback       = Playback(self.audio_in_queue)
 
         # ── Telemetry (background tasks) — pose_cache injected for localization
         self.tel_reader     = TelemetryReader(self.dispatcher, self.safety, self.pose_cache)
@@ -410,7 +408,6 @@ class DroneAI:
             for task in background_tasks:
                 task.cancel()
             await asyncio.gather(*background_tasks, return_exceptions=True)
-            self.pya.terminate()
             if self.oak_pipeline is not None:
                 self.oak_pipeline.stop()
             logger.info("[SESSION] Terminated.")
