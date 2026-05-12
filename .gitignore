@@ -30,3 +30,9 @@ share/python-wheels/
 MANIFEST
 .DS_Store
 memory_store/*
+helper_codes/
+external_codes\logs
+cache/
+.claude/
+external_codes/logsmap.db
+*.db
