@@ -61,6 +61,13 @@ DRONET_MODEL_PATH       = os.environ.get(
 AVOIDANCE_COLLISION_THR = float(os.environ.get("AVOIDANCE_COLLISION_THR", "0.7"))
 AVOIDANCE_STALE_SEC     = float(os.environ.get("AVOIDANCE_STALE_SEC",     "0.5"))
 
+# ─── VIO / SLAM staleness (read early by PoseCache) ─────────────────────────
+# The full VIO/SLAM config block is appended below the Vision section.  This
+# single constant is hoisted here because PoseCache.get() consults it to decide
+# whether the VIO-derived heading is fresh enough to override the telemetry
+# heading.  Without it, both writers would race on _heading_deg.
+VIOSLAM_STALE_SEC       = float(os.environ.get("VIOSLAM_STALE_SEC", "0.5"))
+
 # ─── Vision (OAK-D Lite / DepthAI v3) ───────────────────────────────────────
 # Set VISION_ENABLED=0 to disable all vision tools (e.g. headless CI runs)
 VISION_ENABLED      = os.environ.get("VISION_ENABLED", "1") == "1"

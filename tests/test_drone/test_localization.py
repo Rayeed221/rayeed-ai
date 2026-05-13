@@ -492,3 +492,87 @@ class TestLocalizer:
         obs_north = loc_north.global_observations()[0]
         obs_east  = loc_east.global_observations()[0]
         assert obs_north.lat != obs_east.lat or obs_north.lon != obs_east.lon
+
+
+# ── PoseCache: VIO-heading source ─────────────────────────────────────────────
+
+class TestPoseCacheVIOHeading:
+    """Phase 2 — verify VIO heading priority + staleness fallback."""
+
+    @staticmethod
+    def _make_vio_pose(heading_deg: float):
+        from localization.vio_slam.slam_state import VIOPose
+        return VIOPose(
+            x=0.0, y=0.0, z=0.0,
+            qw=1.0, qx=0.0, qy=0.0, qz=0.0,
+            heading_deg=heading_deg,
+            source="vio",
+            timestamp=time.monotonic(),
+        )
+
+    def test_vio_heading_overrides_telemetry_when_fresh(self):
+        pc = PoseCache()
+        pc.update_position(lat=23.81, lon=90.41, alt_m=5.0)
+        pc.update_telemetry(alt_m=5.0, heading_deg=10.0)
+        pc.update_from_vio(self._make_vio_pose(heading_deg=270.0))
+
+        pose = pc.get()
+        assert pose is not None
+        assert _approx(pose.heading_deg, 270.0, tol=1e-9)
+
+    def test_telemetry_heading_used_when_vio_stale(self):
+        """After VIOSLAM_STALE_SEC, VIO heading must no longer win."""
+        from config import VIOSLAM_STALE_SEC
+
+        pc = PoseCache()
+        pc.update_position(lat=23.81, lon=90.41, alt_m=5.0)
+        pc.update_telemetry(alt_m=5.0, heading_deg=42.0)
+        pc.update_from_vio(self._make_vio_pose(heading_deg=270.0))
+
+        time.sleep(VIOSLAM_STALE_SEC + 0.05)
+
+        pose = pc.get()
+        assert pose is not None
+        assert _approx(pose.heading_deg, 42.0, tol=1e-9)
+
+    def test_subsequent_telemetry_does_not_override_fresh_vio(self):
+        pc = PoseCache()
+        pc.update_position(lat=23.81, lon=90.41, alt_m=5.0)
+        pc.update_from_vio(self._make_vio_pose(heading_deg=180.0))
+        pc.update_telemetry(alt_m=5.0, heading_deg=10.0)   # arrives later
+
+        pose = pc.get()
+        assert pose is not None
+        assert _approx(pose.heading_deg, 180.0, tol=1e-9)
+
+    def test_vio_alone_is_insufficient_without_gps(self):
+        """VIO does not provide lat/lon — get() must still return None."""
+        pc = PoseCache()
+        pc.update_from_vio(self._make_vio_pose(heading_deg=45.0))
+        assert pc.get() is None
+
+    def test_get_vio_pose_returns_none_until_updated(self):
+        pc = PoseCache()
+        assert pc.get_vio_pose() is None
+
+    def test_get_vio_pose_returns_latest(self):
+        pc = PoseCache()
+        first = self._make_vio_pose(heading_deg=10.0)
+        pc.update_from_vio(first)
+        second = self._make_vio_pose(heading_deg=20.0)
+        pc.update_from_vio(second)
+
+        latest = pc.get_vio_pose()
+        assert latest is not None
+        assert _approx(latest.heading_deg, 20.0, tol=1e-9)
+
+    def test_existing_telemetry_only_path_still_works(self):
+        """Backward-compat: no VIO updates ever — old behaviour preserved."""
+        pc = PoseCache()
+        pc.update_position(lat=23.81, lon=90.41, alt_m=5.0)
+        pc.update_telemetry(alt_m=5.0, heading_deg=90.0)
+
+        pose = pc.get()
+        assert pose is not None
+        assert _approx(pose.heading_deg, 90.0, tol=1e-9)
+        assert pc.is_valid()
