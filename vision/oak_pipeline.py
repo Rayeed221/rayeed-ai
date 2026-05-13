@@ -81,8 +81,13 @@ class OakPipeline:
         pipeline = dai.Pipeline()
 
         # ── RGB camera (CAM_A) ────────────────────────────────────────────────
-        cam_rgb = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_A)
-        cam_rgb.setFps(self._fps)
+        # DepthAI v3: sensor fps goes through .build(sensorFps=...) — the unified
+        # dai.node.Camera does not expose .setFps() (that was an old MonoCamera /
+        # ColorCamera API).  See localization/vio_slam/vio_slam_runner.py for the
+        # same pattern on CAM_B / CAM_C.
+        cam_rgb = pipeline.create(dai.node.Camera).build(
+            dai.CameraBoardSocket.CAM_A, sensorFps=self._fps
+        )
 
         # ── Stereo depth ──────────────────────────────────────────────────────
         stereo = pipeline.create(dai.node.StereoDepth)
