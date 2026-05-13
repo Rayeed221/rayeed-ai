@@ -14,9 +14,10 @@ Dispatcher flow (Decision 4 — Planner has override authority):
 
 import asyncio
 import logging
+import time
 from typing import Optional
 
-from config import AVOIDANCE_COLLISION_THR
+from config import AVOIDANCE_COLLISION_THR, VIOSLAM_STALE_SEC
 from schemas import ToolResponse, WaitInstruction
 from state_machine import StateMachine, MissionState, IllegalTransitionError
 from safety_policy import SafetyPolicy
@@ -207,6 +208,20 @@ class ToolDispatcher:
                     "depth_mm":       avoidance.depth_mm,
                     "steering":       avoidance.steering,
                     "active":         avoidance.collision_prob >= AVOIDANCE_COLLISION_THR,
+                }
+            snap = self._safety.get_vioslam_snapshot()
+            pose = self._safety.get_vioslam_pose()
+            if snap is not None and pose is not None:
+                result["slam"] = {
+                    "occupied_cells": snap.occupied_cells,
+                    "vio_pose": {
+                        "x":            pose.x,
+                        "y":            pose.y,
+                        "z":            pose.z,
+                        "heading_deg":  pose.heading_deg,
+                        "source":       pose.source,
+                    },
+                    "stale": (time.monotonic() - snap.timestamp) > VIOSLAM_STALE_SEC,
                 }
 
         logger.info(f"[DISPATCH] ✓ {tool_name} (vision) → state={self._sm.state.value}")

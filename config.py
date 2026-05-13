@@ -62,10 +62,9 @@ AVOIDANCE_COLLISION_THR = float(os.environ.get("AVOIDANCE_COLLISION_THR", "0.7")
 AVOIDANCE_STALE_SEC     = float(os.environ.get("AVOIDANCE_STALE_SEC",     "0.5"))
 
 # ─── VIO / SLAM staleness (read early by PoseCache) ─────────────────────────
-# The full VIO/SLAM config block is appended below the Vision section.  This
-# single constant is hoisted here because PoseCache.get() consults it to decide
-# whether the VIO-derived heading is fresh enough to override the telemetry
-# heading.  Without it, both writers would race on _heading_deg.
+# PoseCache.get() consults this to decide whether the VIO-derived heading is
+# fresh enough to override the telemetry heading.  Hoisted above the Vision
+# section because pose_cache.py imports it; rest of the block is below.
 VIOSLAM_STALE_SEC       = float(os.environ.get("VIOSLAM_STALE_SEC", "0.5"))
 
 # ─── Vision (OAK-D Lite / DepthAI v3) ───────────────────────────────────────
@@ -87,3 +86,16 @@ VISION_CAMERA_OFFSET_R_M = float(os.environ.get("VISION_CAMERA_OFFSET_R_M", "0.0
 VISION_CAMERA_OFFSET_D_M = float(os.environ.get("VISION_CAMERA_OFFSET_D_M", "0.0"))
 # OAK-D Lite RGB camera horizontal field of view (degrees)
 VISION_CAMERA_HFOV_DEG   = float(os.environ.get("VISION_CAMERA_HFOV_DEG",   "73.0"))
+
+# ─── VIO / SLAM (OAK-D Lite + RTABMap on Myriad X) ──────────────────────────
+# HARDWARE CONSTRAINT: cannot run alongside the regular vision tools on the
+# SAME OAK-D unit (Myriad X cannot host RTABMapSLAM + YOLO + SLC concurrently).
+# Set only one of {VISION_ENABLED, VIOSLAM_ENABLED} to "1" per device.
+# (VIOSLAM_STALE_SEC is hoisted earlier — see the section above.)
+VIOSLAM_ENABLED         = os.environ.get("VIOSLAM_ENABLED", "0") == "1"
+VIOSLAM_FPS             = int(os.environ.get("VIOSLAM_FPS", "30"))
+VIOSLAM_SLAM_HZ         = float(os.environ.get("VIOSLAM_SLAM_HZ", "2.0"))
+VIOSLAM_DB_PATH         = os.environ.get("VIOSLAM_DB_PATH", "map.db")
+VIOSLAM_LOAD_DB         = os.environ.get("VIOSLAM_LOAD_DB", "0") == "1"
+VIOSLAM_OCC_CELL_SIZE   = float(os.environ.get("VIOSLAM_OCC_CELL_SIZE", "0.05"))   # MUST equal SLAM_PARAMS["Grid/CellSize"]
+VIOSLAM_PROXIMITY_THR_M = float(os.environ.get("VIOSLAM_PROXIMITY_THR_M", "1.5"))
