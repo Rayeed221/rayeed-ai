@@ -32,6 +32,8 @@ from config import (
     VISION_BLOB_NAME, VISION_BLOB_SHAVES,
     VISION_CAMERA_PITCH_DEG, VISION_CAMERA_YAW_DEG, VISION_CAMERA_HFOV_DEG,
     DRONET_MODEL_PATH,
+    VIOSLAM_ENABLED, VIOSLAM_DB_PATH, VIOSLAM_LOAD_DB,
+    VIOSLAM_FPS, VIOSLAM_SLAM_HZ, VIOSLAM_OCC_CELL_SIZE,
 )
 from schemas import ToolResponse
 from state_machine import StateMachine
@@ -191,6 +193,20 @@ class DroneAI:
         self.safety         = SafetyPolicy(self.sm)
         self.dispatcher     = ToolDispatcher(self.sm, self.safety, self.adapter, _vision_tool)
 
+        # ── VIO/SLAM runner (background task — feature-flagged, non-fatal) ──
+        self.vioslam_runner = None
+        if VIOSLAM_ENABLED:
+            from localization.vio_slam.vio_slam_runner import VIOSLAMRunner
+            self.vioslam_runner = VIOSLAMRunner(
+                db_path=VIOSLAM_DB_PATH,
+                load_db=VIOSLAM_LOAD_DB,
+                fps=VIOSLAM_FPS,
+                slam_hz=VIOSLAM_SLAM_HZ,
+                occ_cell_size=VIOSLAM_OCC_CELL_SIZE,
+                pose_cache=self.pose_cache,
+            )
+            self.safety.set_vioslam_runner(self.vioslam_runner)
+
         # ── Layer 3: Mission planning ────────────────────────────────────────
         self.planner        = Planner(self.sm, self.safety, self.dispatcher)
 
@@ -224,6 +240,18 @@ class DroneAI:
         )
         self.safety.set_avoidance_runner(runner)
         await runner.run()
+
+    # ── VIO/SLAM loop (Layer 2 — autonomous pose + occupancy mapping) ─────────
+
+    async def _vioslam_loop(self) -> None:
+        """Run RTABMap VIO + SLAM at camera fps as a background task.
+
+        No-op when VIOSLAM_ENABLED=0 (runner is None).  Non-fatal on any
+        runtime failure — see VIOSLAMRunner.run().
+        """
+        if self.vioslam_runner is None:
+            return
+        await self.vioslam_runner.run()
 
     # ── Send mic PCM to Gemini ─────────────────────────────────────────────────
 
@@ -376,6 +404,7 @@ class DroneAI:
             loop.create_task(self.bat_monitor.run(),     name="battery_monitor"),
             loop.create_task(self.pos_monitor.run(),     name="position_monitor"),
             loop.create_task(self._avoidance_loop(),     name="avoidance_loop"),
+            loop.create_task(self._vioslam_loop(),       name="vioslam_loop"),
         ]
 
         try:
@@ -385,6 +414,7 @@ class DroneAI:
                 logger.info("  RayeedAI — DroneAI started")
                 logger.info(f"  Backend : {BACKEND.upper()}")
                 logger.info(f"  Vision  : {'OAK-D Lite' if self.oak_pipeline and self.oak_pipeline.available else 'disabled'}")
+                logger.info(f"  VIO/SLAM: {'enabled' if self.vioslam_runner is not None else 'disabled'}")
                 logger.info(f"  State   : {self.sm.state.value}")
                 logger.info("  Speak to RayeedAI. Press Ctrl+C to exit.")
                 logger.info("=" * 60)
