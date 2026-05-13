@@ -102,9 +102,11 @@ class OakPipeline:
         self._q_depth = stereo.depth.createOutputQueue(maxSize=1, blocking=False)
 
         # ── SpatialLocationCalculator (5-sector obstacle scan) ────────────────
+        # DepthAI v3 removed setWaitForConfigInput(); the SLC simply uses
+        # initialConfig when no runtime inputConfig message is wired in,
+        # which is exactly what we want here.
         slc = pipeline.create(dai.node.SpatialLocationCalculator)
         stereo.depth.link(slc.inputDepth)
-        slc.setWaitForConfigInput(False)
 
         slc_cfg = dai.SpatialLocationCalculatorConfig()
         for x0, y0, x1, y1 in _SECTORS.values():
