@@ -138,7 +138,7 @@ class SLCAvoidanceConfig:
     """
 
     # ── MAVLink ──────────────────────────────────────────────────────
-    mavlink_conn: str = "tcp:127.0.0.1:5760"
+    mavlink_conn: str = "tcp:127.0.0.1:5763"
     baudrate: int = 921600
     source_system: int = 1
     source_component: int = 195  # MAV_COMP_ID_PATHPLANNER
@@ -909,7 +909,7 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser(
         description="SLC + SLAM → MAVLink 3D Obstacle Avoidance"
     )
-    p.add_argument("--connect", default="tcp:127.0.0.1:5760")
+    p.add_argument("--connect", default="tcp:127.0.0.1:5763")
     p.add_argument("--test", action="store_true", help="Synthetic obstacle mode")
     p.add_argument("--cols", type=int, default=8, help="SLC grid columns (default: 8)")
     p.add_argument("--rows", type=int, default=5, help="SLC grid rows (default: 5)")

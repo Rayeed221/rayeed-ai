@@ -19,7 +19,9 @@ Run (real drone):
 
 import asyncio
 import logging
+import os
 import traceback
+from pathlib import Path
 
 from google import genai
 from google.genai import types
@@ -31,6 +33,8 @@ from config import (
     VISION_ENABLED, VISION_FPS, VISION_DEPTH_MIN_MM, VISION_DEPTH_MAX_MM,
     VISION_BLOB_NAME, VISION_BLOB_SHAVES,
     VISION_CAMERA_PITCH_DEG, VISION_CAMERA_YAW_DEG, VISION_CAMERA_HFOV_DEG,
+    YOLO_BLOB_DIR, YOLO_AUTO_DOWNLOAD,
+    AUDIO_DEVICE_ID,
     DRONET_MODEL_PATH,
     VIOSLAM_ENABLED, VIOSLAM_DB_PATH, VIOSLAM_LOAD_DB,
     VIOSLAM_FPS, VIOSLAM_SLAM_HZ, VIOSLAM_OCC_CELL_SIZE,
@@ -95,17 +99,37 @@ def build_vision(localizer=None):
         logger.warning(f"[VISION] depthai not installed — vision tools disabled ({exc})")
         return None, None
 
-    # Try to download the YOLO blob (non-fatal if offline or blob unavailable)
+    # Try to download the YOLO blob to local codebase (non-fatal if offline or unavailable)
     blob_path = None
     try:
-        import blobconverter
-        blob_path = blobconverter.from_zoo(
-            name=VISION_BLOB_NAME,
-            shaves=VISION_BLOB_SHAVES,
-            zoo_type="depthai",
-            use_cache=True,
-        )
-        logger.info(f"[VISION] YOLO blob ready: {blob_path}")
+        # Create local models directory if it doesn't exist
+        blob_dir = Path(YOLO_BLOB_DIR)
+        blob_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Construct local blob path
+        blob_filename = f"{VISION_BLOB_NAME}.blob"
+        local_blob_path = blob_dir / blob_filename
+        
+        if local_blob_path.exists():
+            # Use existing local blob
+            blob_path = str(local_blob_path)
+            logger.info(f"[VISION] YOLO blob found locally: {blob_path}")
+        elif YOLO_AUTO_DOWNLOAD:
+            # Download from Luxonis model zoo to local directory
+            import blobconverter
+            downloaded_blob = blobconverter.from_zoo(
+                name=VISION_BLOB_NAME,
+                shaves=VISION_BLOB_SHAVES,
+                zoo_type="depthai",
+                use_cache=True,
+            )
+            # Copy to local models directory
+            import shutil
+            shutil.copy(downloaded_blob, local_blob_path)
+            blob_path = str(local_blob_path)
+            logger.info(f"[VISION] YOLO blob downloaded and cached: {blob_path}")
+        else:
+            logger.warning(f"[VISION] YOLO_AUTO_DOWNLOAD disabled and blob not found at {local_blob_path}")
     except Exception as exc:
         logger.warning(f"[VISION] Blob download failed ({exc}) — detection tool disabled")
 

@@ -4,7 +4,7 @@ import math
 from ollama import chat
 from pymavlink import mavutil
 
-MAVLINK_CONNECTION = os.environ.get("MAVLINK_CONNECTION", "tcp:127.0.0.1:5760")
+MAVLINK_CONNECTION = os.environ.get("MAVLINK_CONNECTION", "tcp:127.0.0.1:5763")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.5:2b")
 
 _mav: mavutil.mavfile | None = None

@@ -22,10 +22,19 @@ DRONE_BACKEND=mavlink MAVLINK_URI=udp:192.168.1.10:14550 python app.py
 pytest
 
 # Run a single test file
-pytest tests/test_state_machine.py -v
+pytest tests/test_drone/test_state_machine.py -v
 
 # Run tests with async support
-pytest tests/test_failures.py -v
+pytest tests/test_drone/test_failures.py -v
+
+# Run VIO-only pipeline (standalone, no SLAM, 60 fps)
+python tests/test_depthai/rtab_map_VIO-60fps.py
+
+# Run VIO + SLAM pipeline (standalone exploration)
+python tests/test_depthai/testing/depthai-vio-slam-exploration.py
+
+# Run live SLAM + 3D path planner (standalone)
+python tests/test_depthai/testing/live_slam_avoidance_FINAL.py [--load] [--db path/to.db]
 ```
 
 ## Architecture
@@ -109,18 +118,106 @@ The LLM never calls avoidance directly. It observes obstacle state through the e
 
 Both adapters implement the same interface from `adapters/base_adapter.py`. Switching between sim and MAVLink requires only an env var change — no code changes.
 
+## VIO and SLAM Integration
+
+### Current State (Exploration Phase)
+
+The VIO/SLAM work lives entirely in `tests/test_depthai/` — it is **not yet wired into the main system**. The production codebase uses only frame-transform-based localization (`localization/`). The exploration files are the reference implementations for integration.
+
+### Existing Localization System (Production)
+
+Three files handle coordinate enrichment today, replacing GPS-only reasoning with camera-space awareness:
+
+- **`localization/frame_transforms.py`** — Pure math: `camera_to_frd()` → `frd_to_ned()` → `ned_to_global()`. Flat-earth approximation. No SLAM.
+- **`localization/pose_cache.py`** — Thread-safe `PoseCache`: merges heading/altitude from `TelemetryReader` and lat/lon from `PositionMonitor`. Staleness check (invalid if any field missing or >10s old).
+- **`localization/localizer.py`** — Enriches vision detections with `local_frame` coordinates. Stores `GlobalObservation` deque for AI reasoning. Handles stale pose gracefully.
+
+### VIO/SLAM Exploration Files
+
+All exploration scripts use the **DepthAI v3 API** with `dai.Pipeline() as p` context manager.
+
+**Pipeline topology** (same in all files):
+
+```text
+CAM_B + CAM_C (stereo)
+  → StereoDepth (HIGH_DENSITY, depth aligned to CAM_B)
+      ├── rectifiedLeft → FeatureTracker (HARRIS, 1000 features)
+      │       ├── passthroughInputImage → RTABMapVIO.rect
+      │       └── outputFeatures → RTABMapVIO.features
+      ├── depth → RTABMapVIO.depth
+IMU (ACCELEROMETER_RAW + GYROSCOPE_RAW @ 200 Hz) → RTABMapVIO.imu
+      │
+RTABMapVIO.transform → RTABMapSLAM.odom
+RTABMapVIO.passthroughRect → RTABMapSLAM.rect
+RTABMapVIO.passthroughDepth → RTABMapSLAM.depth
+```
+
+**Key exploration files:**
+
+| File | Purpose |
+| --- | --- |
+| `tests/test_depthai/rtab_map_VIO-60fps.py` | Minimal VIO-only at 60 fps; logs pose quaternion to console |
+| `tests/test_depthai/rtab_map_SLAM-60fps.py` | VIO + SLAM at 60 fps; same topology |
+| `tests/test_depthai/testing/depthai-vio-slam-exploration.py` | Full parameter-annotated VIO+SLAM reference (use this as template); saves to `map.db` |
+| `tests/test_depthai/testing/live_slam_avoidance_FINAL.py` | SLAM + 3D A* path planner; reads `slam.obstaclePCL` → `LiveOccupancyGrid` → `FastPlanner3D`; `--load` flag for relocalization |
+| `tests/test_depthai/testing/path_planner_3d.py` | Standalone `FastPlanner3D` with visualization |
+| `tests/test_depthai/testing/rtab_map_SLAM_enhanced.py` | Enhanced SLAM with additional outputs |
+| `tests/test_depthai/testing/RTABMAP_PARAMETERS_REFERENCE.md` | Full RTAB-Map parameter reference for the DepthAI node |
+
+### VIO Parameters (Key Knobs)
+
+`RTABMapVIO.setParams()` — all string-valued:
+
+- `Odom/Strategy`: `"0"` (F2M, frame-to-map) — default and best for drones
+- `Vis/FeatureType`: `"8"` (GFTT+ORB) — fast, runs on Myriad X; matches `Kp/DetectorStrategy`
+- `Vis/MaxFeatures` / `Vis/MinInliers`: `"600"` / `"15"` — lower = faster, less accurate
+- `Vis/MaxDepth` / `Vis/MinDepth`: `"4.0"` / `"0.3"` — match to `Icp/RangeMin`/`Max` and `Grid/RangeMax`
+- `Reg/Force3DoF`: **must be `"0"`** for drones (full 6-DOF); `"1"` is for ground robots only
+- `OdometryF2M/MaxSize`: `"1000"` — local 3D map size; higher = more accurate, more RAM
+
+### SLAM Parameters (Key Knobs)
+
+`RTABMapSLAM.setParams()` — all string-valued:
+
+- `slam.setFreq(2.0)` — SLAM node runs at 2 Hz (VIO runs at camera fps)
+- `Rtabmap/DetectionRate`: `"1.0"` or `"2.0"` — mirror `setFreq()`
+- `Mem/IncrementalMemory`: `"1"` (mapping) vs `"0"` (localization-only mode)
+- `slam.setLoadDatabaseOnStart(True)` — for relocalization into a previously saved map
+- `slam.setSaveDatabasePeriod(60.0)` — auto-save interval in seconds
+- `Grid/3D`: `"1"` — 3D voxel grid; required for obstacle point cloud (`slam.obstaclePCL`)
+- `Grid/CellSize`: `"0.05"` — 5 cm resolution; matches `LiveOccupancyGrid` default
+- `Optimizer/Strategy`: `"1"` (g2o) — pose graph optimizer; `"2"` is GTSAM
+- `Kp/DetectorStrategy` **must match** `Vis/FeatureType` (both `"8"` for GFTT+ORB)
+
+### Integration Plan (VIO/SLAM → Main System)
+
+The intended integration path: replace `PoseCache` GPS-based pose with VIO odometry, and feed SLAM obstacle clouds to a new avoidance layer alongside DroNet.
+
+**Outputs available from the VIO+SLAM pipeline for integration:**
+
+| Queue | Data | Use |
+| --- | --- | --- |
+| `vio.transform` | 6-DOF pose (translation + quaternion) | Replace / augment `PoseCache` |
+| `slam.transform` | Loop-closure-corrected pose | Primary `PoseCache` source when available |
+| `slam.obstaclePCL` | 3D obstacle point cloud | Feed `LiveOccupancyGrid` for A* planning |
+| `slam.groundPCL` | Ground point cloud | Landing zone detection |
+
+**Integration touch points in the main system:**
+
+1. `localization/pose_cache.py` — add a `update_from_vio(transform)` method; VIO pose becomes the primary source when fresh, GPS as fallback
+2. `app.py` — add a fifth background task: `VIOSLAMRunner` (similar structure to `DroNetRunner`)
+3. `safety_policy.py` — add a SLAM-based proximity gate using occupancy grid
+4. `tool_dispatcher.py` — enrich `vision_obstacle_check` with SLAM occupancy data alongside existing DroNet state
+
+**Frame convention for VIO poses:** VIO transform is in the camera's starting frame (camera Z = forward, X = right, Y = down). Use `localization/frame_transforms.py` to convert to NED/GPS before writing to `PoseCache`.
+
+### map.db
+
+`map.db` in the repo root is a saved RTAB-Map database from previous exploration sessions (~75 MB, gitignored). Load it with `slam.setLoadDatabaseOnStart(True)` and `slam.setDatabasePath("./map.db")` for relocalization testing.
+
 ## MAVLink Adapter Implementation
 
 The stub lives at `adapters/mavlink_adapter.py`. All 18 `_handle_*()` methods exist but return `{"error": "MAVLink not yet wired..."}`. The `SimAdapter` at `adapters/sim_adapter.py` is the reference implementation — match its structure exactly.
-
-### Dependency
-
-`pymavlink` is **not in `requirements.txt`** — add it before implementing:
-
-```bash
-pip install pymavlink
-# then add "pymavlink" to requirements.txt
-```
 
 ### Execution Model
 
@@ -165,7 +262,7 @@ On any failure, return `{"error": "<description>"}` — the dispatcher treats th
 
 ### Testing the Adapter
 
-Mirror `tests/test_tools.py` — it covers all 18 handlers for `SimAdapter` and is the template for MAVLink tests. Adapter tests are **not async** (the `asyncio.to_thread` wrapping is the dispatcher's job):
+Mirror `tests/test_drone/test_tools.py` — it covers all 18 handlers for `SimAdapter` and is the template for MAVLink tests. Adapter tests are **not async** (the `asyncio.to_thread` wrapping is the dispatcher's job):
 
 ```python
 @pytest.fixture
@@ -196,6 +293,13 @@ Safety thresholds (all configurable):
 - Telemetry stale: 5s → wait; 10s → emergency failsafe
 - Max retries: 3
 
+Vision:
+
+- `VISION_ENABLED` — set to `0` for headless/sim runs
+- `DRONET_MODEL_PATH` — path to MyriadX blob
+
 ## Testing
 
-Framework: `pytest` + `pytest-asyncio`. All test files are in `tests/`. Each major subsystem has its own test file covering normal paths, error/retry paths, and state transitions.
+Framework: `pytest` + `pytest-asyncio`. All test files are in `tests/test_drone/`. Each major subsystem has its own test file covering normal paths, error/retry paths, and state transitions.
+
+VIO/SLAM exploration scripts in `tests/test_depthai/` require a connected OAK-D Lite; they are standalone scripts, not pytest test cases.

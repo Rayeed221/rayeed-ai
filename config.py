@@ -13,23 +13,23 @@ MODEL = "models/gemini-3.1-flash-live-preview"
 # ─── Ollama ──────────────────────────────────────────────────────────────────
 OLLAMA_BASE_URL   = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL      = os.environ.get("OLLAMA_MODEL", "qwen3:latest")
-MAVLINK_CONNECTION = os.environ.get("MAVLINK_CONNECTION", "tcp:127.0.0.1:5760")
 
 # ─── Groq ────────────────────────────────────────────────────────────────────
 GROQ_MODEL        = os.environ.get("GROQ_MODEL", "qwen/qwen3-32b")
 
 # ─── Audio ──────────────────────────────────────────────────────────────────
-SEND_SAMPLE_RATE    = 16000
-RECEIVE_SAMPLE_RATE = 24000
-CHUNK_SIZE          = 512
-CHANNELS            = 1
+SEND_SAMPLE_RATE    = int(os.environ.get("SEND_SAMPLE_RATE", "16000"))
+RECEIVE_SAMPLE_RATE = int(os.environ.get("RECEIVE_SAMPLE_RATE", "24000"))
+CHUNK_SIZE          = int(os.environ.get("CHUNK_SIZE", "512"))
+CHANNELS            = int(os.environ.get("CHANNELS", "1"))
+AUDIO_DEVICE_ID     = os.environ.get("AUDIO_DEVICE_ID")  # None = default; set to device index for specific mic
 
 # ─── Backend ────────────────────────────────────────────────────────────────
 # Options: "sim" | "mavlink"
 # BACKEND     = os.environ.get("DRONE_BACKEND", "sim")
 BACKEND     = os.environ.get("DRONE_BACKEND", "mavlink")
 
-MAVLINK_URI = os.environ.get("MAVLINK_URI", "tcp:127.0.0.1:5762")
+MAVLINK_URI = os.environ.get("MAVLINK_URI", "tcp:127.0.0.1:5763")
 
 # ─── Safety Thresholds ──────────────────────────────────────────────────────
 BATTERY_CRITICAL_PCT  = 15        # % → trigger emergency
@@ -76,6 +76,10 @@ VISION_DEPTH_MAX_MM = int(os.environ.get("VISION_DEPTH_MAX_MM", "8000"))  # 8 m
 # YOLO blob from Luxonis model zoo (auto-downloaded by blobconverter)
 VISION_BLOB_NAME    = os.environ.get("VISION_BLOB_NAME", "yolov6n_coco_416x416")
 VISION_BLOB_SHAVES  = int(os.environ.get("VISION_BLOB_SHAVES", "6"))
+
+# YOLO blob local caching — save to codebase instead of system cache
+YOLO_BLOB_DIR       = os.environ.get("YOLO_BLOB_DIR", "vision/models")
+YOLO_AUTO_DOWNLOAD  = os.environ.get("YOLO_AUTO_DOWNLOAD", "1") == "1"
 
 # Camera mounting relative to drone body (FRD axes).
 # Adjust these when the OAK-D Lite is not mounted level and forward-facing.

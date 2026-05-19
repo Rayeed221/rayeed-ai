@@ -49,7 +49,7 @@ FUNCTION_DECLARATIONS = [
             properties={
                 "connection_string": types.Schema(
                     type=types.Type.STRING,
-                    description="MAVLink URI e.g. 'tcp:127.0.0.1:5760'",
+                    description="MAVLink URI e.g. 'tcp:127.0.0.1:5763'",
                 )
             },
             required=[],

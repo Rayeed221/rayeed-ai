@@ -36,3 +36,9 @@ cache/
 .claude/
 external_codes/logsmap.db
 *.db
+
+# YOLO blob files (large, generated locally)
+vision/models/*.blob
+!vision/models/.gitkeep
+vision/standalone/continuous_embedded_recordings
+external_codes/logs
