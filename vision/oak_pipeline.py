@@ -92,7 +92,7 @@ class OakPipeline:
         # ── Stereo depth ──────────────────────────────────────────────────────
         stereo = pipeline.create(dai.node.StereoDepth)
         stereo.setDefaultProfilePreset(
-            dai.node.StereoDepth.PresetMode.HIGH_DENSITY
+            dai.node.StereoDepth.PresetMode.DEFAULT
         )
         stereo.setLeftRightCheck(True)   # filter occluded pixels
         stereo.setSubpixel(False)        # disabled for speed on Myriad X

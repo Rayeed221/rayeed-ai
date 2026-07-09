@@ -29,7 +29,7 @@ AUDIO_DEVICE_ID     = os.environ.get("AUDIO_DEVICE_ID")  # None = default; set t
 # BACKEND     = os.environ.get("DRONE_BACKEND", "sim")
 BACKEND     = os.environ.get("DRONE_BACKEND", "mavlink")
 
-MAVLINK_URI = os.environ.get("MAVLINK_URI", "tcp:127.0.0.1:5763")
+MAVLINK_URI = os.environ.get("MAVLINK_URI", "tcp:127.0.0.1:5760")
 
 # ─── Safety Thresholds ──────────────────────────────────────────────────────
 BATTERY_CRITICAL_PCT  = 15        # % → trigger emergency
