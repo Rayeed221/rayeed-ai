@@ -19,9 +19,10 @@ Run (real drone):
 
 import asyncio
 import logging
+import os
 import traceback
+from pathlib import Path
 
-import pyaudio
 from google import genai
 from google.genai import types
 
@@ -32,6 +33,11 @@ from config import (
     VISION_ENABLED, VISION_FPS, VISION_DEPTH_MIN_MM, VISION_DEPTH_MAX_MM,
     VISION_BLOB_NAME, VISION_BLOB_SHAVES,
     VISION_CAMERA_PITCH_DEG, VISION_CAMERA_YAW_DEG, VISION_CAMERA_HFOV_DEG,
+    YOLO_BLOB_DIR, YOLO_AUTO_DOWNLOAD,
+    AUDIO_DEVICE_ID,
+    DRONET_MODEL_PATH,
+    VIOSLAM_ENABLED, VIOSLAM_DB_PATH, VIOSLAM_LOAD_DB,
+    VIOSLAM_FPS, VIOSLAM_SLAM_HZ, VIOSLAM_OCC_CELL_SIZE,
 )
 from schemas import ToolResponse
 from state_machine import StateMachine
@@ -93,17 +99,37 @@ def build_vision(localizer=None):
         logger.warning(f"[VISION] depthai not installed — vision tools disabled ({exc})")
         return None, None
 
-    # Try to download the YOLO blob (non-fatal if offline or blob unavailable)
+    # Try to download the YOLO blob to local codebase (non-fatal if offline or unavailable)
     blob_path = None
     try:
-        import blobconverter
-        blob_path = blobconverter.from_zoo(
-            name=VISION_BLOB_NAME,
-            shaves=VISION_BLOB_SHAVES,
-            zoo_type="depthai",
-            use_cache=True,
-        )
-        logger.info(f"[VISION] YOLO blob ready: {blob_path}")
+        # Create local models directory if it doesn't exist
+        blob_dir = Path(YOLO_BLOB_DIR)
+        blob_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Construct local blob path
+        blob_filename = f"{VISION_BLOB_NAME}.blob"
+        local_blob_path = blob_dir / blob_filename
+        
+        if local_blob_path.exists():
+            # Use existing local blob
+            blob_path = str(local_blob_path)
+            logger.info(f"[VISION] YOLO blob found locally: {blob_path}")
+        elif YOLO_AUTO_DOWNLOAD:
+            # Download from Luxonis model zoo to local directory
+            import blobconverter
+            downloaded_blob = blobconverter.from_zoo(
+                name=VISION_BLOB_NAME,
+                shaves=VISION_BLOB_SHAVES,
+                zoo_type="depthai",
+                use_cache=True,
+            )
+            # Copy to local models directory
+            import shutil
+            shutil.copy(downloaded_blob, local_blob_path)
+            blob_path = str(local_blob_path)
+            logger.info(f"[VISION] YOLO blob downloaded and cached: {blob_path}")
+        else:
+            logger.warning(f"[VISION] YOLO_AUTO_DOWNLOAD disabled and blob not found at {local_blob_path}")
     except Exception as exc:
         logger.warning(f"[VISION] Blob download failed ({exc}) — detection tool disabled")
 
@@ -162,7 +188,6 @@ LIVE_CONFIG = types.LiveConnectConfig(
 
 class DroneAI:
     def __init__(self):
-        self.pya            = pyaudio.PyAudio()
         self.session        = None
 
         # Queues
@@ -192,13 +217,27 @@ class DroneAI:
         self.safety         = SafetyPolicy(self.sm)
         self.dispatcher     = ToolDispatcher(self.sm, self.safety, self.adapter, _vision_tool)
 
+        # ── VIO/SLAM runner (background task — feature-flagged, non-fatal) ──
+        self.vioslam_runner = None
+        if VIOSLAM_ENABLED:
+            from localization.vio_slam.vio_slam_runner import VIOSLAMRunner
+            self.vioslam_runner = VIOSLAMRunner(
+                db_path=VIOSLAM_DB_PATH,
+                load_db=VIOSLAM_LOAD_DB,
+                fps=VIOSLAM_FPS,
+                slam_hz=VIOSLAM_SLAM_HZ,
+                occ_cell_size=VIOSLAM_OCC_CELL_SIZE,
+                pose_cache=self.pose_cache,
+            )
+            self.safety.set_vioslam_runner(self.vioslam_runner)
+
         # ── Layer 3: Mission planning ────────────────────────────────────────
         self.planner        = Planner(self.sm, self.safety, self.dispatcher)
 
         # ── Layer 1: Audio interface ─────────────────────────────────────────
         self.turn_manager   = TurnManager()
-        self.mic_capture    = MicCapture(self.pya, self.mic_queue)
-        self.playback       = Playback(self.pya, self.audio_in_queue)
+        self.mic_capture    = MicCapture(self.mic_queue)
+        self.playback       = Playback(self.audio_in_queue)
 
         # ── Telemetry (background tasks) — pose_cache injected for localization
         self.tel_reader     = TelemetryReader(self.dispatcher, self.safety, self.pose_cache)
@@ -208,6 +247,35 @@ class DroneAI:
         # ── Memory (persistent state) ────────────────────────────────────────
         self.mission_mem    = MissionMemory()
         self.env_mem        = EnvironmentMemory()
+
+    # ── DroNet avoidance loop (Layer 2 — autonomous, not LLM-driven) ──────────
+
+    async def _avoidance_loop(self) -> None:
+        """Run DroNet at ~20 Hz as a background task (non-fatal if OAK-D absent)."""
+        try:
+            from vision.avoidance.dronet_runner import DroNetRunner
+        except ImportError as exc:
+            logger.warning(f"[AVOIDANCE] DroNetRunner not available: {exc}")
+            return
+
+        runner = DroNetRunner(
+            mav_connection_string=MAVLINK_URI,
+            model_path=DRONET_MODEL_PATH,
+        )
+        self.safety.set_avoidance_runner(runner)
+        await runner.run()
+
+    # ── VIO/SLAM loop (Layer 2 — autonomous pose + occupancy mapping) ─────────
+
+    async def _vioslam_loop(self) -> None:
+        """Run RTABMap VIO + SLAM at camera fps as a background task.
+
+        No-op when VIOSLAM_ENABLED=0 (runner is None).  Non-fatal on any
+        runtime failure — see VIOSLAMRunner.run().
+        """
+        if self.vioslam_runner is None:
+            return
+        await self.vioslam_runner.run()
 
     # ── Send mic PCM to Gemini ─────────────────────────────────────────────────
 
@@ -274,7 +342,7 @@ class DroneAI:
                             tool_resp: ToolResponse = await self.dispatcher.dispatch(fc.name, args)
 
                             # Planner authority: may override LLM next_action
-                            decision = self.planner.decide(tool_resp)
+                            decision = await self.planner.decide(tool_resp)
                             logger.info(f"[PLANNER] {fc.name} → {decision.value}")
 
                             if decision == PlanDecision.WAIT and tool_resp.wait:
@@ -354,11 +422,26 @@ class DroneAI:
         """
         loop = asyncio.get_event_loop()
 
-        # ── Background tasks started before session opens ──────────────────
+        # 1. Connect to drone if MAVLink (Mandatory first step for hardware mode)
+        if BACKEND == "mavlink":
+            logger.info("[SYSTEM] Attempting initial MAVLink connection...")
+            try:
+                # connect_drone is synchronous and blocking (wait_heartbeat)
+                connect_result = await asyncio.to_thread(self.adapter.execute, "connect_drone", {})
+                if "error" in connect_result:
+                    logger.error(f"[SYSTEM] Initial MAVLink connection failed: {connect_result['error']}")
+                else:
+                    logger.info(f"[SYSTEM] Initial MAVLink connection successful: {connect_result}")
+            except Exception as e:
+                logger.error(f"[SYSTEM] Error during initial MAVLink connection: {e}")
+
+        # 2. Background tasks started before session opens ──────────────────
         background_tasks = [
-            loop.create_task(self.tel_reader.run(),  name="telemetry_reader"),
-            loop.create_task(self.bat_monitor.run(), name="battery_monitor"),
-            loop.create_task(self.pos_monitor.run(), name="position_monitor"),
+            loop.create_task(self.tel_reader.run(),      name="telemetry_reader"),
+            loop.create_task(self.bat_monitor.run(),     name="battery_monitor"),
+            loop.create_task(self.pos_monitor.run(),     name="position_monitor"),
+            loop.create_task(self._avoidance_loop(),     name="avoidance_loop"),
+            loop.create_task(self._vioslam_loop(),       name="vioslam_loop"),
         ]
 
         try:
@@ -368,6 +451,7 @@ class DroneAI:
                 logger.info("  RayeedAI — DroneAI started")
                 logger.info(f"  Backend : {BACKEND.upper()}")
                 logger.info(f"  Vision  : {'OAK-D Lite' if self.oak_pipeline and self.oak_pipeline.available else 'disabled'}")
+                logger.info(f"  VIO/SLAM: {'enabled' if self.vioslam_runner is not None else 'disabled'}")
                 logger.info(f"  State   : {self.sm.state.value}")
                 logger.info("  Speak to RayeedAI. Press Ctrl+C to exit.")
                 logger.info("=" * 60)
@@ -391,7 +475,6 @@ class DroneAI:
             for task in background_tasks:
                 task.cancel()
             await asyncio.gather(*background_tasks, return_exceptions=True)
-            self.pya.terminate()
             if self.oak_pipeline is not None:
                 self.oak_pipeline.stop()
             logger.info("[SESSION] Terminated.")

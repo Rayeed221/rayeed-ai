@@ -41,9 +41,19 @@ _MAV_RESULT_ACCEPTED           = 0
 # SET_POSITION_TARGET_GLOBAL_INT type_mask: ignore velocity, accel, yaw, yaw_rate; use position only
 _POS_TARGET_TYPE_MASK          = 0b110111111000  # bits 3-8, 10-11 ignored; bits 0-2 used
 
+# Telemetry stream IDs (only the three we need)
+_STREAMS_TO_REQUEST = [
+    (2, "EXTENDED_STATUS (battery, system status)"),      # SYS_STATUS, BATTERY_STATUS
+    (6, "POSITION (GPS, altitude, velocity)"),            # GLOBAL_POSITION_INT
+    (10, "EXTRA1 (VFR_HUD, attitude)"),                   # VFR_HUD, ATTITUDE
+]
+
+# Common error message for telemetry failures
+_TELEMETRY_ERROR = "no telemetry received — check: 1) autopilot connected? 2) connected via MAVLink? 3) correct baud rate?"
+
 
 class MAVLinkAdapter(BaseAdapter):
-    def __init__(self, connection_string: str = "udp:127.0.0.1:14550"):
+    def __init__(self, connection_string: str = "tcp:127.0.0.1:5762"):
         self._connection_string = connection_string
         self._conn = None
 
@@ -66,7 +76,38 @@ class MAVLinkAdapter(BaseAdapter):
 
     def _recv(self, msg_type: str, timeout: float = 5.0):
         """Receive a specific MAVLink message type; returns None on timeout."""
-        return self._conn.recv_match(type=msg_type, blocking=True, timeout=timeout)
+        if not self.is_connected():
+            return None
+        try:
+            return self._conn.recv_match(type=msg_type, blocking=True, timeout=timeout)
+        except Exception as e:
+            logger.error(f"[MAVLINK] recv_match({msg_type}) failed: {e}")
+            return None
+
+    def _request_streams(self):
+        """Request all required telemetry streams from autopilot."""
+        try:
+            for stream_id, description in _STREAMS_TO_REQUEST:
+                self._conn.mav.request_data_stream_send(
+                    self._conn.target_system,
+                    self._conn.target_component,
+                    stream_id,
+                    10,  # 10 Hz
+                    1,   # start
+                )
+            logger.info("[MAVLINK] Requested telemetry streams")
+        except Exception as e:
+            logger.warning(f"[MAVLINK] Could not request streams (non-fatal): {e}")
+
+    def _flush_queue(self):
+        """Drain stale messages from receive queue."""
+        try:
+            time.sleep(0.3)
+            while self._conn.recv_match(blocking=False) is not None:
+                pass
+            logger.info("[MAVLINK] Queue flushed")
+        except Exception:
+            pass
 
     def _send_command_long(self, command: int, p1=0.0, p2=0.0, p3=0.0,
                            p4=0.0, p5=0.0, p6=0.0, p7=0.0,
@@ -108,9 +149,11 @@ class MAVLinkAdapter(BaseAdapter):
             self._conn = mavutil.mavlink_connection(uri)
             self._conn.wait_heartbeat(timeout=15)
             logger.info(
-                f"[MAVLINK] heartbeat from system={self._conn.target_system} "
+                f"[MAVLINK] Connected — system={self._conn.target_system} "
                 f"component={self._conn.target_component}"
             )
+            self._request_streams()
+            self._flush_queue()
             return {"status": "connected", "connection_string": uri}
         except Exception as exc:
             self._conn = None
@@ -130,9 +173,10 @@ class MAVLinkAdapter(BaseAdapter):
         return {"mode": mode_str, "armed": armed, "system_status": system_status}
 
     def _handle_get_telemetry(self):
-        pos = self._recv("GLOBAL_POSITION_INT")
+        pos = self._recv("GLOBAL_POSITION_INT", timeout=5.0)
         if pos is None:
-            return {"error": "no GLOBAL_POSITION_INT received"}
+            return {"error": _TELEMETRY_ERROR}
+        
         vfr = self._recv("VFR_HUD", timeout=2.0)
         altitude    = pos.relative_alt / 1000.0
         heading     = pos.hdg / 100.0 if pos.hdg != 65535 else 0.0
@@ -147,9 +191,9 @@ class MAVLinkAdapter(BaseAdapter):
         }
 
     def _handle_get_position_str(self):
-        pos = self._recv("GLOBAL_POSITION_INT")
+        pos = self._recv("GLOBAL_POSITION_INT", timeout=5.0)
         if pos is None:
-            return {"error": "no GLOBAL_POSITION_INT received"}
+            return {"error": _TELEMETRY_ERROR}
         lat = pos.lat / 1e7
         lon = pos.lon / 1e7
         alt = pos.relative_alt / 1000.0
@@ -165,7 +209,7 @@ class MAVLinkAdapter(BaseAdapter):
         else:
             msg = self._recv("SYS_STATUS", timeout=3.0)
             if msg is None:
-                return {"error": "no battery message received"}
+                return {"error": _TELEMETRY_ERROR}
             voltage = msg.voltage_battery / 1000.0
             current = msg.current_battery / 100.0
             level   = float(msg.battery_remaining)

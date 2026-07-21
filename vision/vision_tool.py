@@ -69,6 +69,16 @@ class VisionTool:
         if not self._pipeline.available:
             return {"error": "OAK-D camera not available"}
 
+        # If the v3 pipeline reports the USB link as down, try to rebuild it
+        # before reporting failure.  This is the v3-native equivalent of
+        # dai.Device.setMaxReconnectionAttempts() — we own the pipeline object
+        # and can detect the drop via pipeline.isRunning().
+        if not self._pipeline.is_healthy():
+            logger.warning("[VISION] Pipeline unhealthy — attempting reconnect before tool call")
+            reconnected = self._pipeline.force_reconnect()
+            if not reconnected:
+                return {"error": "OAK-D camera disconnected and reconnect failed — vision offline"}
+
         if tool_name == "vision_obstacle_check":
             return self._obstacle_check(args)
         if tool_name == "vision_depth_snapshot":

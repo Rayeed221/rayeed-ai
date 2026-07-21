@@ -4,14 +4,8 @@ import math
 from ollama import chat
 from pymavlink import mavutil
 
-# ---------------------------------------------------------------------------
-# MAVLink connection — set MAVLINK_CONNECTION to your vehicle endpoint,
-# e.g. "udpin:0.0.0.0:14550", "tcp:127.0.0.1:5760", or "/dev/ttyUSB0,57600"
-# ---------------------------------------------------------------------------
-
-MAVLINK_CONNECTION = os.environ.get("MAVLINK_CONNECTION", "tcp:127.0.0.1:5760")
-# OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3:latest")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.5:2b")
+MAVLINK_CONNECTION = os.environ.get("MAVLINK_CONNECTION", "tcp:127.0.0.1:5763")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3:latest")
 
 _mav: mavutil.mavfile | None = None
 
@@ -27,30 +21,31 @@ def get_mav() -> mavutil.mavfile:
 # MAVLink helpers
 # ---------------------------------------------------------------------------
 
-# Map mode name → ArduPilot custom_mode number (ArduCopter)
 _COPTER_MODES = {
-    "MANUAL":  0,   # STABILIZE used as manual-ish baseline
-    "GUIDED":  4,
-    "LAND":    9,
-    "RTL":     6,
+    "STABILIZE": 0,
+    "GUIDED":    4,
+    "LOITER":    5,
+    "RTL":       6,
+    "LAND":      9,
+    "POSHOLD":  16,
 }
 
 def _set_mode(mav: mavutil.mavfile, mode_name: str) -> dict:
     custom_mode = _COPTER_MODES.get(mode_name.upper())
     if custom_mode is None:
-        return {"status": "error", "message": f"Unknown mode: {mode_name}"}
+        return {"status": "error", "message": f"Unknown mode: {mode_name}. Valid: {list(_COPTER_MODES)}"}
     mav.mav.command_long_send(
         mav.target_system,
         mav.target_component,
         mavutil.mavlink.MAV_CMD_DO_SET_MODE,
-        0,                                         # confirmation
+        0,
         mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED,
         custom_mode,
         0, 0, 0, 0, 0,
     )
     ack = mav.recv_match(type="COMMAND_ACK", blocking=True, timeout=5)
     if ack and ack.result == mavutil.mavlink.MAV_RESULT_ACCEPTED:
-        return {"status": "ok", "mode": mode_name, "message": f"Mode set to {mode_name}"}
+        return {"status": "ok", "mode": mode_name}
     return {"status": "error", "message": f"Mode change rejected (ack={ack})"}
 
 
@@ -59,13 +54,13 @@ def _arm(mav: mavutil.mavfile) -> dict:
         mav.target_system,
         mav.target_component,
         mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM,
-        0,   # confirmation
-        1,   # arm
+        0,
+        1,   # param1: 1=arm
         0, 0, 0, 0, 0, 0,
     )
     ack = mav.recv_match(type="COMMAND_ACK", blocking=True, timeout=5)
     if ack and ack.result == mavutil.mavlink.MAV_RESULT_ACCEPTED:
-        return {"status": "armed", "message": "Vehicle armed successfully"}
+        return {"status": "armed"}
     return {"status": "error", "message": f"Arm rejected (ack={ack})"}
 
 
@@ -74,113 +69,87 @@ def _disarm(mav: mavutil.mavfile) -> dict:
         mav.target_system,
         mav.target_component,
         mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM,
-        0,   # confirmation
-        0,   # disarm
+        0,
+        0,   # param1: 0=disarm
         0, 0, 0, 0, 0, 0,
     )
     ack = mav.recv_match(type="COMMAND_ACK", blocking=True, timeout=5)
     if ack and ack.result == mavutil.mavlink.MAV_RESULT_ACCEPTED:
-        return {"status": "disarmed", "message": "Vehicle disarmed"}
+        return {"status": "disarmed"}
     return {"status": "error", "message": f"Disarm rejected (ack={ack})"}
 
 
-def _navigate_global(mav: mavutil.mavfile, lat: float, lon: float, alt: float, yaw: float | None) -> dict:
+def _goto_gps(mav: mavutil.mavfile, lat: float, lon: float, alt: float, yaw: float | None) -> dict:
     """
-    SET_POSITION_TARGET_GLOBAL_INT — moves to absolute GPS position in GUIDED mode.
-    lat/lon supplied as degrees; multiplied to int×1e7 internally.
-    yaw in degrees; NaN (ignored) when None.
+    SET_POSITION_TARGET_GLOBAL_INT in MAV_FRAME_GLOBAL_RELATIVE_ALT_INT.
+    type_mask bits: 1=ignore. Use position (bits 0-2 clear) + optional yaw.
+    0x9F8 = ignore vel+accel+yaw_rate, use pos+yaw
+    0xDF8 = ignore vel+accel+yaw+yaw_rate, use pos only
     """
-    type_mask = (
-        0b0000_111111_000_111   # use pos + yaw, ignore vel/accel/yaw-rate
-        if yaw is not None
-        else 0b0000_111111_100_111  # also ignore yaw
-    )
-    yaw_val = math.radians(yaw) if yaw is not None else 0.0
+    type_mask = 0x9F8 if yaw is not None else 0xDF8
+    yaw_rad = math.radians(yaw) if yaw is not None else 0.0
     mav.mav.set_position_target_global_int_send(
-        0,                                          # time_boot_ms
+        0,
         mav.target_system,
         mav.target_component,
         mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
         type_mask,
-        int(lat * 1e7),                             # lat_int (deg × 1e7)
-        int(lon * 1e7),                             # lon_int (deg × 1e7)
-        alt,                                        # alt (m, relative to home)
-        0, 0, 0,                                    # vx, vy, vz (ignored)
-        0, 0, 0,                                    # afx, afy, afz (ignored)
-        yaw_val, 0,                                 # yaw (rad), yaw_rate
+        int(lat * 1e7),
+        int(lon * 1e7),
+        alt,
+        0, 0, 0,   # vx, vy, vz (ignored)
+        0, 0, 0,   # afx, afy, afz (ignored)
+        yaw_rad, 0,
     )
-    return {
-        "status": "executing",
-        "frame": "global",
-        "lat": lat, "lon": lon, "alt": alt,
-        "message": "Global navigate command sent",
-    }
+    return {"status": "moving", "frame": "global", "lat": lat, "lon": lon, "alt": alt}
 
 
-def _navigate_local(mav: mavutil.mavfile, x: float, y: float, z: float, yaw: float | None) -> dict:
+def _goto_local(mav: mavutil.mavfile, x: float, y: float, z: float, yaw: float | None) -> dict:
     """
-    SET_POSITION_TARGET_LOCAL_NED with MAV_FRAME_LOCAL_NED.
-    x=North, y=East, z=Down (NED convention, z negative = up).
+    SET_POSITION_TARGET_LOCAL_NED in MAV_FRAME_LOCAL_NED.
+    x=North(m), y=East(m), z=Down(m, use negative to climb).
+    0x9F8 = ignore vel+accel+yaw_rate, use pos+yaw
+    0xDF8 = ignore vel+accel+yaw+yaw_rate, use pos only
     """
-    type_mask = (
-        0b0000_111111_000_111  # ignore velocity, accel, force, yaw-rate; use pos + yaw
-        if yaw is not None
-        else 0b0000_111111_100_111   # also ignore yaw
-    )
-    yaw_val = math.radians(yaw) if yaw is not None else 0.0
+    type_mask = 0x9F8 if yaw is not None else 0xDF8
+    yaw_rad = math.radians(yaw) if yaw is not None else 0.0
     mav.mav.set_position_target_local_ned_send(
-        0,                                              # time_boot_ms (ignored)
+        0,
         mav.target_system,
         mav.target_component,
         mavutil.mavlink.MAV_FRAME_LOCAL_NED,
         type_mask,
-        x, y, z,                                       # position (m)
-        0, 0, 0,                                        # velocity (ignored)
-        0, 0, 0,                                        # accel   (ignored)
-        yaw_val, 0,                                     # yaw, yaw_rate
+        x, y, z,
+        0, 0, 0,   # velocity (ignored)
+        0, 0, 0,   # accel (ignored)
+        yaw_rad, 0,
     )
-    return {
-        "status": "executing",
-        "frame": "local",
-        "x": x, "y": y, "z": z,
-        "message": "Local NED navigate command sent",
-    }
+    return {"status": "moving", "frame": "local_ned", "x": x, "y": y, "z": z}
 
 
-def _navigate_body(mav: mavutil.mavfile, dx: float, dy: float, dz: float, yaw: float | None) -> dict:
+def _move_body(mav: mavutil.mavfile, dx: float, dy: float, dz: float) -> dict:
     """
-    SET_POSITION_TARGET_LOCAL_NED with MAV_FRAME_BODY_OFFSET_NED.
-    dx/dy/dz are offsets in the body (forward/right/down) frame.
+    SET_POSITION_TARGET_LOCAL_NED in MAV_FRAME_BODY_OFFSET_NED.
+    dx=forward(m), dy=right(m), dz=down(m, negative=up).
+    0xDF8 = ignore vel+accel+yaw+yaw_rate, use pos only
     """
-    type_mask = (
-        0b0000_111111_000_111
-        if yaw is not None
-        else 0b0000_111111_100_111
-    )
-    yaw_val = math.radians(yaw) if yaw is not None else 0.0
     mav.mav.set_position_target_local_ned_send(
         0,
         mav.target_system,
         mav.target_component,
         mavutil.mavlink.MAV_FRAME_BODY_OFFSET_NED,
-        type_mask,
+        0xDF8,
         dx, dy, dz,
         0, 0, 0,
         0, 0, 0,
-        yaw_val, 0,
+        0, 0,
     )
-    return {
-        "status": "executing",
-        "frame": "body",
-        "dx": dx, "dy": dy, "dz": dz,
-        "message": "Body-offset navigate command sent",
-    }
+    return {"status": "moving", "frame": "body_offset", "dx": dx, "dy": dy, "dz": dz}
 
 
 def _observe(mav: mavutil.mavfile, data_keys: list[str]) -> dict:
     result = {}
 
-    # Fetch VFR_HUD once if either heading or airspeed is requested
     vfr_hud = None
     if "heading" in data_keys or "airspeed" in data_keys:
         vfr_hud = mav.recv_match(type="VFR_HUD", blocking=True, timeout=3)
@@ -209,7 +178,8 @@ def _observe(mav: mavutil.mavfile, data_keys: list[str]) -> dict:
                     "satellites": fix_msg.satellites_visible if fix_msg else -1,
                     "lat": msg.lat / 1e7,
                     "lon": msg.lon / 1e7,
-                    "alt": msg.alt / 1000.0,   # mm → m (AMSL)
+                    "alt_amsl": msg.alt / 1000.0,
+                    "alt_rel": msg.relative_alt / 1000.0,
                 }
             else:
                 result["gps"] = {"error": "timeout"}
@@ -237,10 +207,9 @@ def _observe(mav: mavutil.mavfile, data_keys: list[str]) -> dict:
                 result["local_vio"] = {"error": "timeout"}
 
         elif key == "depth":
-            # DISTANCE_SENSOR downward-facing (MAV_SENSOR_ROTATION_PITCH_270)
             msg = mav.recv_match(type="DISTANCE_SENSOR", blocking=True, timeout=3)
             if msg:
-                result["depth"] = {"meters": msg.current_distance / 100.0}  # cm → m
+                result["depth"] = {"meters": msg.current_distance / 100.0}
             else:
                 result["depth"] = {"error": "timeout"}
 
@@ -255,75 +224,80 @@ def execute_tool(name: str, args: dict) -> str:
     mav = get_mav()
 
     if name == "observe":
-        data_keys = args.get("data", [])
-        result = _observe(mav, data_keys)
-        return json.dumps(result)
+        return json.dumps(_observe(mav, args.get("data", [])))
 
-    elif name == "control":
-        action = args.get("action")
-        if action == "arm":
-            return json.dumps(_arm(mav))
-        elif action == "disarm":
-            return json.dumps(_disarm(mav))
-        elif action == "set_mode":
-            return json.dumps(_set_mode(mav, args.get("mode", "")))
-        return json.dumps({"status": "error", "message": f"Unknown action: {action}"})
+    elif name == "arm":
+        return json.dumps(_arm(mav))
 
-    elif name == "navigate":
-        frame = args.get("frame")
-        yaw = args.get("yaw")
-        if frame == "global":
-            return json.dumps(_navigate_global(
-                mav,
-                lat=args["lat"], lon=args["lon"], alt=args["alt"],
-                yaw=yaw,
-            ))
-        elif frame == "local":
-            return json.dumps(_navigate_local(
-                mav,
-                x=args.get("x", 0.0), y=args.get("y", 0.0), z=args.get("z", 0.0),
-                yaw=yaw,
-            ))
-        elif frame == "body":
-            return json.dumps(_navigate_body(
-                mav,
-                dx=args.get("dx", 0.0), dy=args.get("dy", 0.0), dz=args.get("dz", 0.0),
-                yaw=yaw,
-            ))
-        return json.dumps({"status": "error", "message": f"Unknown frame: {frame}"})
+    elif name == "disarm":
+        return json.dumps(_disarm(mav))
+
+    elif name == "set_mode":
+        return json.dumps(_set_mode(mav, args.get("mode", "")))
+    elif name == "goto_gps":
+        return json.dumps(_goto_gps(
+            mav,
+            lat=args["lat"], lon=args["lon"], alt=args["alt"],
+            yaw=args.get("yaw"),
+        ))
+
+    elif name == "goto_local":
+        return json.dumps(_goto_local(
+            mav,
+            x=args["x"], y=args["y"], z=args["z"],
+            yaw=args.get("yaw"),
+        ))
+
+    elif name == "move_body":
+        return json.dumps(_move_body(
+            mav,
+            dx=args["dx"], dy=args["dy"], dz=args["dz"],
+        ))
 
     return json.dumps({"status": "error", "message": f"Unknown tool: {name}"})
 
 
 # ---------------------------------------------------------------------------
-# Tool definitions — each description carries a per-tool usage snippet so
-# the model knows exactly when and how to call it without reading the system
-# prompt again.
+# Tool definitions
 # ---------------------------------------------------------------------------
 
 TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "control",
+            "name": "arm",
+            "description": "Arm the motors. Requires GUIDED mode. Call set_mode first.",
+            "parameters": {"type": "object", "required": [], "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "disarm",
+            "description": "Disarm the motors. Only call when on the ground after landing.",
+            "parameters": {"type": "object", "required": [], "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_mode",
             "description": (
-                "Vehicle state control. "
-                "Call set_mode(GUIDED) before arm. "
-                "Call arm and initialte TAKEOFF "
+                "Set ArduCopter flight mode. "
+                "GUIDED: autonomous position control (required before arm/navigate). "
+                "RTL: return to launch and land. "
+                "LAND: land at current position. "
+                "LOITER: hold position. "
+                "POSHOLD: manual position hold. "
+                "STABILIZE: manual attitude control."
             ),
             "parameters": {
                 "type": "object",
-                "required": ["action"],
+                "required": ["mode"],
                 "properties": {
-                    "action": {
-                        "type": "string",
-                        "enum": ["arm", "disarm", "set_mode"],
-                        "description": "arm | disarm | set_mode",
-                    },
                     "mode": {
                         "type": "string",
-                        "enum": ["MANUAL", "GUIDED", "LAND", "RTL"],
-                        "description": "Required when action=set_mode.",
+                        "enum": ["GUIDED", "RTL", "LAND", "LOITER", "POSHOLD", "STABILIZE"],
                     },
                 },
             },
@@ -332,29 +306,60 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "navigate",
+            "name": "goto_gps",
             "description": (
-                "Move drone to a position. "
-                "Use frame=global for absolute GPS targets (lat/lon/alt). "
-                "Use frame=local for NED-relative field patterns (x/y/z metres). "
-                "Use frame=body for small obstacle-avoidance offsets (dx/dy/dz). "
-                "Always depends_on arm before first navigate."
+                "Fly to an absolute GPS coordinate. "
+                "Requires GUIDED mode and armed. "
+                "alt is meters relative to home (takeoff point)."
             ),
             "parameters": {
                 "type": "object",
-                "required": ["frame"],
+                "required": ["lat", "lon", "alt"],
                 "properties": {
-                    "frame": {"type": "string", "enum": ["global", "local", "body"]},
-                    "lat":  {"type": "number"},
-                    "lon":  {"type": "number"},
-                    "alt":  {"type": "number"},
-                    "x":    {"type": "number"},
-                    "y":    {"type": "number"},
-                    "z":    {"type": "number"},
-                    "dx":   {"type": "number"},
-                    "dy":   {"type": "number"},
-                    "dz":   {"type": "number"},
-                    "yaw":  {"type": "number", "description": "Heading in degrees (optional)."},
+                    "lat": {"type": "number", "description": "Target latitude in decimal degrees."},
+                    "lon": {"type": "number", "description": "Target longitude in decimal degrees."},
+                    "alt": {"type": "number", "description": "Target altitude in meters above home."},
+                    "yaw": {"type": "number", "description": "Target heading 0-359 degrees (optional)."},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "goto_local",
+            "description": (
+                "Fly to a NED position relative to the origin (arming point). "
+                "x=North, y=East, z=Down (use negative z to climb, e.g. z=-10 = 10m altitude)."
+            ),
+            "parameters": {
+                "type": "object",
+                "required": ["x", "y", "z"],
+                "properties": {
+                    "x": {"type": "number", "description": "North offset in meters."},
+                    "y": {"type": "number", "description": "East offset in meters."},
+                    "z": {"type": "number", "description": "Down offset in meters (negative = up)."},
+                    "yaw": {"type": "number", "description": "Target heading 0-359 degrees (optional)."},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "move_body",
+            "description": (
+                "Move relative to current position in body frame. "
+                "dx=forward, dy=right, dz=down (negative dz = up). "
+                "Useful for precise obstacle avoidance or fine adjustments."
+            ),
+            "parameters": {
+                "type": "object",
+                "required": ["dx", "dy", "dz"],
+                "properties": {
+                    "dx": {"type": "number", "description": "Forward offset in meters (negative = backward)."},
+                    "dy": {"type": "number", "description": "Right offset in meters (negative = left)."},
+                    "dz": {"type": "number", "description": "Down offset in meters (negative = up)."},
                 },
             },
         },
@@ -364,10 +369,10 @@ TOOLS = [
         "function": {
             "name": "observe",
             "description": (
-                "Read drone telemetry or sensor data. "
-                "Always call with [battery,gps] before every arm or navigate. "
-                "Call with [local_vio] or [gps] after every navigate to confirm position. "
-                "Call with [airspeed,heading] to monitor dynamic conditions mid-flight."
+                "Read drone telemetry. "
+                "Always call observe(['battery','gps']) before arm or navigate. "
+                "Call observe(['local_vio']) after navigation to confirm position. "
+                "Call observe(['heading','airspeed']) to monitor flight conditions."
             ),
             "parameters": {
                 "type": "object",
@@ -379,7 +384,7 @@ TOOLS = [
                             "type": "string",
                             "enum": ["battery", "gps", "heading", "airspeed", "local_vio", "depth"],
                         },
-                        "description": "Sensors to read.",
+                        "description": "List of sensors to read.",
                     },
                 },
             },
@@ -393,12 +398,22 @@ TOOLS = [
 # ---------------------------------------------------------------------------
 
 SYSTEM_PROMPT = """\
-You are AerialAgent, an autonomous context gathering agent for controlling a single drone to execute complex missions. 
+You are AerialAgent, an autonomous drone controller. Execute missions safely via tool calls.
 
-Your goal is to achieve the mission objective by ordered sequence of tool calls generationds.
-Reason concisely in 3 steps. First, define the user goal. Second, analyze the current drone state got from the user. Third, determine the next step where you need to make further thinking process.
-Do not generate any prose or markdown, only JSON. Do not include any extra keys in the JSON, only "tasks" with a list of tool calls.
+SAFETY RULES (never skip):
+1. observe(['battery','gps']) before every arm or navigate — abort if battery < 20% or GPS fix != 3D
+2. set_mode('GUIDED') before arm
+3. observe(['local_vio']) after every goto_* to confirm arrival
 
+FLIGHT SEQUENCE:
+  observe → set_mode(GUIDED) → arm → goto_gps/goto_local → observe → ... → set_mode(LAND) → disarm
+
+NAVIGATION:
+  goto_gps(lat, lon, alt)      — absolute GPS target
+  goto_local(x, y, z)          — NED offset from origin (z negative = climb)
+  move_body(dx, dy, dz)        — relative to current body frame
+
+Think step by step, then issue only the next required tool call.
 """
 
 
@@ -406,7 +421,7 @@ Do not generate any prose or markdown, only JSON. Do not include any extra keys 
 # Agent loop
 # ---------------------------------------------------------------------------
 
-def run_agent(mission: str, max_turns: int = 10) -> None:
+def run_agent(mission: str, max_turns: int = 20) -> None:
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user",   "content": mission},
@@ -417,16 +432,13 @@ def run_agent(mission: str, max_turns: int = 10) -> None:
         print(f"Turn {turn + 1}")
         print(f"{'-' * 60}")
 
-        # Stream with thinking enabled
         stream = chat(
             model=OLLAMA_MODEL,
             messages=messages,
             tools=TOOLS,
-            think=True,
-            # think=True,
-            options={"temperature": 0.1, "max_tokens":512, "n_ctx": 1024, "seed": 36},
+            think=False,
+            options={"temperature": 1, "n_ctx": 2048, "seed": 36},
             stream=True,
-            
         )
 
         thinking_buf = ""
@@ -458,7 +470,6 @@ def run_agent(mission: str, max_turns: int = 10) -> None:
             print("\n[/thinking]\n", flush=True)
         print()
 
-        # Append full assistant turn to history (thinking + content + tool_calls)
         messages.append({
             "role": "assistant",
             "thinking": thinking_buf,
@@ -466,12 +477,10 @@ def run_agent(mission: str, max_turns: int = 10) -> None:
             "tool_calls": tool_calls,
         })
 
-        # No tool calls → model is done
         if not tool_calls:
             print(f"\n[done] no further tool calls")
             break
 
-        # Execute each tool and append results
         for tc in tool_calls:
             name = tc.function.name
             args = dict(tc.function.arguments) if tc.function.arguments else {}
@@ -497,6 +506,11 @@ def run_agent(mission: str, max_turns: int = 10) -> None:
 
 if __name__ == "__main__":
     MISSION = (
-        "Conduct a precision solar farm inspection at lat 32.7157, lon -117.1611. Take off to 15m altitude and follow a zig-zag path across 12 predefined rows of panels (spacing 10m). Maintain a ground speed of exactly 1.5 m/s. If the heading deviates by more than 5 degrees due to wind, stop and hover for 5 seconds to stabilize. At the end of row 6, observe battery level; if battery is above 60%, continue to row 12, otherwise RTL immediately. Disarm 5 seconds after touchdown."
+        "Conduct a precision solar farm inspection at lat 32.7157, lon -117.1611. "
+        "Take off to 15m altitude and follow a zig-zag path across 12 predefined rows of panels (spacing 10m). "
+        "Maintain a ground speed of exactly 1.5 m/s. If heading deviates by more than 5 degrees due to wind, "
+        "stop and hover for 5 seconds to stabilize. At the end of row 6, observe battery level; "
+        "if battery is above 60%, continue to row 12, otherwise RTL immediately. "
+        "Disarm 5 seconds after touchdown."
     )
     run_agent(MISSION)
