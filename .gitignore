@@ -42,3 +42,10 @@ vision/models/*.blob
 !vision/models/.gitkeep
 vision/standalone/continuous_embedded_recordings
 external_codes/logs
+tests/test_depthai/.cache
+vision/avoidance/.cache
+vision/standalone/.cache
+map.db-journal
+resume.txt
+.cache/
+mav*

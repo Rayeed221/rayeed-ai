@@ -422,7 +422,20 @@ class DroneAI:
         """
         loop = asyncio.get_event_loop()
 
-        # ── Background tasks started before session opens ──────────────────
+        # 1. Connect to drone if MAVLink (Mandatory first step for hardware mode)
+        if BACKEND == "mavlink":
+            logger.info("[SYSTEM] Attempting initial MAVLink connection...")
+            try:
+                # connect_drone is synchronous and blocking (wait_heartbeat)
+                connect_result = await asyncio.to_thread(self.adapter.execute, "connect_drone", {})
+                if "error" in connect_result:
+                    logger.error(f"[SYSTEM] Initial MAVLink connection failed: {connect_result['error']}")
+                else:
+                    logger.info(f"[SYSTEM] Initial MAVLink connection successful: {connect_result}")
+            except Exception as e:
+                logger.error(f"[SYSTEM] Error during initial MAVLink connection: {e}")
+
+        # 2. Background tasks started before session opens ──────────────────
         background_tasks = [
             loop.create_task(self.tel_reader.run(),      name="telemetry_reader"),
             loop.create_task(self.bat_monitor.run(),     name="battery_monitor"),

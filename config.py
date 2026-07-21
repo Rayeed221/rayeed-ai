@@ -69,8 +69,8 @@ VIOSLAM_STALE_SEC       = float(os.environ.get("VIOSLAM_STALE_SEC", "0.5"))
 
 # ─── Vision (OAK-D Lite / DepthAI v3) ───────────────────────────────────────
 # Set VISION_ENABLED=0 to disable all vision tools (e.g. headless CI runs)
-VISION_ENABLED      = os.environ.get("VISION_ENABLED", "1") == "1"
-VISION_FPS          = int(os.environ.get("VISION_FPS", "15"))
+VISION_ENABLED      = os.environ.get("VISION_ENABLED", "0") == "1"
+VISION_FPS          = int(os.environ.get("VISION_FPS", "10"))
 VISION_DEPTH_MIN_MM = int(os.environ.get("VISION_DEPTH_MIN_MM", "200"))   # 20 cm
 VISION_DEPTH_MAX_MM = int(os.environ.get("VISION_DEPTH_MAX_MM", "8000"))  # 8 m
 # YOLO blob from Luxonis model zoo (auto-downloaded by blobconverter)
@@ -96,9 +96,9 @@ VISION_CAMERA_HFOV_DEG   = float(os.environ.get("VISION_CAMERA_HFOV_DEG",   "73.
 # SAME OAK-D unit (Myriad X cannot host RTABMapSLAM + YOLO + SLC concurrently).
 # Set only one of {VISION_ENABLED, VIOSLAM_ENABLED} to "1" per device.
 # (VIOSLAM_STALE_SEC is hoisted earlier — see the section above.)
-VIOSLAM_ENABLED         = os.environ.get("VIOSLAM_ENABLED", "0") == "1"
-VIOSLAM_FPS             = int(os.environ.get("VIOSLAM_FPS", "30"))
-VIOSLAM_SLAM_HZ         = float(os.environ.get("VIOSLAM_SLAM_HZ", "2.0"))
+VIOSLAM_ENABLED         = os.environ.get("VIOSLAM_ENABLED", "1") == "1"
+VIOSLAM_FPS             = int(os.environ.get("VIOSLAM_FPS", "5"))
+VIOSLAM_SLAM_HZ         = float(os.environ.get("VIOSLAM_SLAM_HZ", "10.0"))
 VIOSLAM_DB_PATH         = os.environ.get("VIOSLAM_DB_PATH", "map.db")
 VIOSLAM_LOAD_DB         = os.environ.get("VIOSLAM_LOAD_DB", "0") == "1"
 VIOSLAM_OCC_CELL_SIZE   = float(os.environ.get("VIOSLAM_OCC_CELL_SIZE", "0.05"))   # MUST equal SLAM_PARAMS["Grid/CellSize"]
