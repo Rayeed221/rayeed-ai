@@ -18,6 +18,13 @@ python app.py
 # Run with real drone via MAVLink
 DRONE_BACKEND=mavlink MAVLINK_URI=udp:192.168.1.10:14550 python app.py
 
+# Run headless / CI (no OAK-D, no SLAM pipeline)
+VISION_ENABLED=0 VIOSLAM_ENABLED=0 python app.py
+
+# Build the Thinking Oracle model (optional qwen3:0.6b reasoning layer; requires Ollama)
+ollama pull qwen3:0.6b
+ollama create droneoracle -f thinking_oracle.Modelfile
+
 # Run all tests
 pytest
 
@@ -59,7 +66,7 @@ In ArduPilot GUIDED mode, velocity commands are ephemeral — they override the 
 
 1. **Audio Interface** (`audio/`) — Mic capture → PCM → Gemini; speaker playback. `turn_manager.py` mutes mic while AI is speaking.
 
-2. **LLM Orchestration** (`app.py` + `tools/declarations.py`) — Manages the Gemini Live session, system prompt (Bangla), function declarations, and the resilient receive loop. Session tasks (mic, send, receive, playback) are isolated from background tasks (telemetry, battery, position, avoidance) so a crash in one doesn't kill the other.
+2. **LLM Orchestration** (`app.py` + `tools/declarations.py`) — Manages the Gemini Live session, system prompt (Bangla), function declarations, and the resilient receive loop. Session tasks (mic, send, receive, playback) are isolated from the **five** background tasks (telemetry, battery, position, avoidance, VIO/SLAM) so a crash in one doesn't kill the other.
 
 3. **Mission Planning** (`planner.py` + `workflows/`) — Decision engine with 6 outcomes: `CONTINUE`, `WAIT`, `RETRY`, `REPLAN`, `ABORT`, `FAILSAFE`. The planner has **authority to override LLM decisions** for safety. Phase 1b inserts an avoidance gate: returns `WAIT` while DroNet is actively steering around an obstacle, escalates to `REPLAN` if stuck > 10 s continuously.
 
@@ -69,6 +76,19 @@ In ArduPilot GUIDED mode, velocity commands are ephemeral — they override the 
 
 6. **Avoidance Layer** (`vision/avoidance/dronet_runner.py`) — `DroNetRunner` runs PULP-DroNet v3 on the OAK-D Lite at ~20 Hz as an asyncio background task. Publishes `AvoidanceState` (thread-safe); sends `SET_POSITION_TARGET_LOCAL_NED` velocity commands directly over MAVLink. Non-fatal if depthai or OAK-D are absent.
 
+7. **VIO/SLAM Layer** (`localization/vio_slam/vio_slam_runner.py`) — `VIOSLAMRunner` is the **fifth** background task (default `VIOSLAM_ENABLED=1`). Owns its own DepthAI v3 RTAB-Map VIO+SLAM pipeline; publishes `VIOPose` into `PoseCache` and a `LiveOccupancyGrid` that `safety_policy.py` reads for a SLAM-proximity gate. Non-fatal if depthai/OAK-D are absent. See "VIO and SLAM Integration" below — this is now **production-wired**, no longer exploration-only.
+
+8. **Memory Layer** (`memory/`) — Two JSON-backed stores (`memory_store/`, gitignored): `MissionMemory` persists mission state + an event log (`mission_log.jsonl`) for crash recovery; `EnvironmentMemory` persists spatial knowledge (named waypoints, obstacle markers, no-fly zones) across sessions. Both are constructed in `app.py`.
+
+### Optional Reasoning Layer — Thinking Oracle
+
+An **opt-in** augmentation (`thinking_oracle.py` + `planner_oracle_patch.py`) that inserts a qwen3:0.6b chain-of-thought step between critical actions and the planner's rule-based decision. It is **not imported by `app.py` by default** — activate it by swapping one import (`from planner import ...` → `from planner_oracle_patch import ...`). Requires a local Ollama server with a `droneoracle` model built from `thinking_oracle.Modelfile`.
+
+- `ThinkingOracle.deliberate(ctx)` is **synchronous** (wrap in `asyncio.to_thread()` from async callers), streams qwen3's `think=True` block, and parses a structured JSON decision mapping 1:1 onto the planner's 6 outcomes.
+- `_rule_fallback()` mirrors `safety_policy.py` thresholds **exactly**, so any oracle failure (Ollama down, timeout, unparseable output) degrades to the original deterministic behavior with zero safety regression.
+- Only invoked for `HIGH_VALUE_TOOLS`, failed calls, or while airborne — trivial read-only polling is skipped.
+- Oracle-guided workflows: `workflows/takeoff_oracle.py`, `workflows/navigation_oracle.py`.
+
 ### Key Files
 
 | File | Role |
@@ -76,13 +96,18 @@ In ArduPilot GUIDED mode, velocity commands are ephemeral — they override the 
 | `app.py` | Entry point; `DroneAI` class; Gemini Live session + background task group |
 | `state_machine.py` | Mission states (IDLE→CONNECTED→ARMED→TAKEOFF→ENROUTE→HOVER→LANDING→RTL→FAILSAFE) and legal transition graph |
 | `tool_dispatcher.py` | Central 7-step execution pipeline; enriches `vision_obstacle_check` with live DroNet state |
-| `safety_policy.py` | Pre-execution gates: battery, telemetry, altitude, speed, retry limits, **avoidance** |
+| `safety_policy.py` | Pre-execution gates: battery, telemetry, altitude, speed, retry limits, **DroNet avoidance**, **SLAM proximity** |
 | `planner.py` | Decision engine; Phase 1b avoidance gate; overrides LLM `next_action`; non-blocking waits |
 | `tool_registry.py` | Metadata for 25+ tools: description, arg schema, permission level, allowed states |
-| `schemas.py` | `ToolResponse` envelope (ok, tool, state, data, error, next_action, wait, confidence, timestamp) |
-| `config.py` | All thresholds and env vars (API keys, audio rates, backend, safety limits, avoidance thresholds) |
+| `schemas.py` | `ToolResponse` envelope; also `MissionEvent` used by `memory/` |
+| `config.py` | All thresholds and env vars (API keys, audio rates, backend, safety limits, avoidance + VIO/SLAM thresholds) |
 | `vision/avoidance/dronet_runner.py` | `DroNetRunner` + `AvoidanceState`; autonomous 20 Hz avoidance loop |
 | `vision/avoidance/run_dronet_oak.py` | Standalone DroNet CLI (unchanged by integration) |
+| `localization/vio_slam/vio_slam_runner.py` | `VIOSLAMRunner`; production VIO+SLAM background task; publishes `VIOPose` + `LiveOccupancyGrid` |
+| `thinking_oracle.py` | Opt-in qwen3:0.6b reasoning layer; `ThinkingOracle.deliberate()` (sync) |
+| `planner_oracle_patch.py` | Drop-in `Planner` replacement that calls the oracle before rule fallback |
+| `memory/mission_memory.py` | Crash-recovery state + JSONL event log (`memory_store/`) |
+| `memory/environment_memory.py` | Persistent waypoints / obstacles / no-fly zones |
 
 ### Tool Execution Flow
 
@@ -98,7 +123,7 @@ Every drone command goes through `tool_dispatcher.py`:
 
 ### Avoidance Integration
 
-`DroNetRunner` runs as a fourth background task alongside `TelemetryReader`, `BatteryMonitor`, and `PositionMonitor`. `SafetyPolicy` holds a direct reference to the runner and reads `AvoidanceState` on-demand — no polling relay task.
+`DroNetRunner` runs as the fourth background task alongside `TelemetryReader`, `BatteryMonitor`, and `PositionMonitor` (with `VIOSLAMRunner` as the fifth). `SafetyPolicy` holds a direct reference to the runner and reads `AvoidanceState` on-demand — no polling relay task.
 
 Key constants in `config.py`:
 
@@ -120,9 +145,24 @@ Both adapters implement the same interface from `adapters/base_adapter.py`. Swit
 
 ## VIO and SLAM Integration
 
-### Current State (Exploration Phase)
+### Current State (Production-Wired)
 
-The VIO/SLAM work lives entirely in `tests/test_depthai/` — it is **not yet wired into the main system**. The production codebase uses only frame-transform-based localization (`localization/`). The exploration files are the reference implementations for integration.
+VIO/SLAM is **now integrated** as the package `localization/vio_slam/` and runs as a background task in `app.py` when `VIOSLAM_ENABLED=1` (the default). The `tests/test_depthai/` scripts remain as standalone hardware references, but the production runner (`VIOSLAMRunner`) mirrors `vision/avoidance/dronet_runner.py` 1:1: lazy `import depthai` inside `run()`, all blocking DepthAI calls wrapped in `asyncio.to_thread()`, thread-safe state behind one lock, cooperative cancel via `CancelledError`.
+
+**Production package (`localization/vio_slam/`):**
+
+| File | Role |
+| --- | --- |
+| `vio_slam_runner.py` | `VIOSLAMRunner` background task; owns the DepthAI pipeline; publishes pose + grid |
+| `slam_state.py` | `VIOPose`, `SLAMSnapshot` thread-safe dataclasses |
+| `occupancy_grid.py` | `LiveOccupancyGrid` — 3D obstacle grid with decay; queried by `safety_policy.check_slam_proximity()` |
+| `rtabmap_params.py` | `VIO_PARAMS` / `SLAM_PARAMS` dicts (see knob docs below) |
+
+> **Hardware constraint:** the OAK-D Lite's Myriad X cannot host RTABMapSLAM + SpatialLocationCalculator + YOLO at once. Enable **only one** of `{VISION_ENABLED, VIOSLAM_ENABLED}` per OAK-D unit. `rtabmap_params.py` forces the C numeric locale at import so a comma-decimal system locale can't corrupt the string-valued params.
+
+**SLAM proximity gate:** `safety_policy.py` holds a `VIOSLAMRunner` reference (`set_vioslam_runner()`) and blocks `goto_position` / `set_speed` when the occupancy grid shows an obstacle within `VIOSLAM_PROXIMITY_THR_M` along the forward vector (pose must be fresher than `VIOSLAM_STALE_SEC`).
+
+### Existing Localization System (Production)
 
 ### Existing Localization System (Production)
 
@@ -189,25 +229,16 @@ RTABMapVIO.passthroughDepth → RTABMapSLAM.depth
 - `Optimizer/Strategy`: `"1"` (g2o) — pose graph optimizer; `"2"` is GTSAM
 - `Kp/DetectorStrategy` **must match** `Vis/FeatureType` (both `"8"` for GFTT+ORB)
 
-### Integration Plan (VIO/SLAM → Main System)
+### Pipeline Outputs (wired into the main system)
 
-The intended integration path: replace `PoseCache` GPS-based pose with VIO odometry, and feed SLAM obstacle clouds to a new avoidance layer alongside DroNet.
-
-**Outputs available from the VIO+SLAM pipeline for integration:**
+**Outputs consumed from the VIO+SLAM pipeline:**
 
 | Queue | Data | Use |
 | --- | --- | --- |
-| `vio.transform` | 6-DOF pose (translation + quaternion) | Replace / augment `PoseCache` |
+| `vio.transform` | 6-DOF pose (translation + quaternion) | Published as `VIOPose` into `PoseCache` |
 | `slam.transform` | Loop-closure-corrected pose | Primary `PoseCache` source when available |
-| `slam.obstaclePCL` | 3D obstacle point cloud | Feed `LiveOccupancyGrid` for A* planning |
+| `slam.obstaclePCL` | 3D obstacle point cloud | Fed to `LiveOccupancyGrid` for the SLAM proximity gate |
 | `slam.groundPCL` | Ground point cloud | Landing zone detection |
-
-**Integration touch points in the main system:**
-
-1. `localization/pose_cache.py` — add a `update_from_vio(transform)` method; VIO pose becomes the primary source when fresh, GPS as fallback
-2. `app.py` — add a fifth background task: `VIOSLAMRunner` (similar structure to `DroNetRunner`)
-3. `safety_policy.py` — add a SLAM-based proximity gate using occupancy grid
-4. `tool_dispatcher.py` — enrich `vision_obstacle_check` with SLAM occupancy data alongside existing DroNet state
 
 **Frame convention for VIO poses:** VIO transform is in the camera's starting frame (camera Z = forward, X = right, Y = down). Use `localization/frame_transforms.py` to convert to NED/GPS before writing to `PoseCache`.
 
@@ -293,13 +324,22 @@ Safety thresholds (all configurable):
 - Telemetry stale: 5s → wait; 10s → emergency failsafe
 - Max retries: 3
 
-Vision:
+Vision & avoidance:
 
-- `VISION_ENABLED` — set to `0` for headless/sim runs
+- `VISION_ENABLED` — default `0`; set `1` to enable YOLO vision tools (mutually exclusive with `VIOSLAM_ENABLED` per OAK-D)
 - `DRONET_MODEL_PATH` — path to MyriadX blob
+- `AVOIDANCE_COLLISION_THR` (`0.7`) / `AVOIDANCE_STALE_SEC` (`0.5`) — DroNet gate thresholds
+
+VIO/SLAM (all read in `config.py`, default **enabled**):
+
+- `VIOSLAM_ENABLED` — default `1`; owns the OAK-D VIO+SLAM background task
+- `VIOSLAM_DB_PATH` (`map.db`) / `VIOSLAM_LOAD_DB` (`0`) — RTAB-Map DB path and relocalization-load flag
+- `VIOSLAM_FPS` (`5`) / `VIOSLAM_SLAM_HZ` (`10.0`) — camera and SLAM node rates
+- `VIOSLAM_OCC_CELL_SIZE` (`0.05`) — **must equal** `SLAM_PARAMS["Grid/CellSize"]`
+- `VIOSLAM_PROXIMITY_THR_M` (`1.5`) / `VIOSLAM_STALE_SEC` (`0.5`) — SLAM proximity gate distance and pose-freshness bound
 
 ## Testing
 
-Framework: `pytest` + `pytest-asyncio`. All test files are in `tests/test_drone/`. Each major subsystem has its own test file covering normal paths, error/retry paths, and state transitions.
+Framework: `pytest` + `pytest-asyncio`. All test files are in `tests/test_drone/`. Each major subsystem has its own test file covering normal paths, error/retry paths, and state transitions — including `test_vio_slam_runner.py`, `test_occupancy_grid.py`, `test_localization.py`, and `test_thinking_oracle.py` (the oracle suite mocks `ollama.chat`, so it needs no Ollama server or hardware).
 
 VIO/SLAM exploration scripts in `tests/test_depthai/` require a connected OAK-D Lite; they are standalone scripts, not pytest test cases.
