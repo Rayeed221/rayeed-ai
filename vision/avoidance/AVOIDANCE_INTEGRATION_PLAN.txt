@@ -134,7 +134,7 @@ STEP 5 — planner.py  [EDIT]
   DroNet handles transient obstacles automatically. The planner only
   escalates when avoidance has been running too long (drone is stuck).
 
-  Add between Phase 1 (hard gates) and Phase 2 (oracle):
+  Add between Phase 1 (hard gates) and Phase 2 (rule-based decision):
 
     if self._is_airborne() and self._avoidance_state:
         prob = self._avoidance_state.collision_prob

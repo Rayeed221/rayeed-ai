@@ -21,10 +21,6 @@ DRONE_BACKEND=mavlink MAVLINK_URI=udp:192.168.1.10:14550 python app.py
 # Run headless / CI (no OAK-D, no SLAM pipeline)
 VISION_ENABLED=0 VIOSLAM_ENABLED=0 python app.py
 
-# Build the Thinking Oracle model (optional qwen3:0.6b reasoning layer; requires Ollama)
-ollama pull qwen3:0.6b
-ollama create droneoracle -f thinking_oracle.Modelfile
-
 # Run all tests
 pytest
 
@@ -80,15 +76,6 @@ In ArduPilot GUIDED mode, velocity commands are ephemeral — they override the 
 
 8. **Memory Layer** (`memory/`) — Two JSON-backed stores (`memory_store/`, gitignored): `MissionMemory` persists mission state + an event log (`mission_log.jsonl`) for crash recovery; `EnvironmentMemory` persists spatial knowledge (named waypoints, obstacle markers, no-fly zones) across sessions. Both are constructed in `app.py`.
 
-### Optional Reasoning Layer — Thinking Oracle
-
-An **opt-in** augmentation (`thinking_oracle.py` + `planner_oracle_patch.py`) that inserts a qwen3:0.6b chain-of-thought step between critical actions and the planner's rule-based decision. It is **not imported by `app.py` by default** — activate it by swapping one import (`from planner import ...` → `from planner_oracle_patch import ...`). Requires a local Ollama server with a `droneoracle` model built from `thinking_oracle.Modelfile`.
-
-- `ThinkingOracle.deliberate(ctx)` is **synchronous** (wrap in `asyncio.to_thread()` from async callers), streams qwen3's `think=True` block, and parses a structured JSON decision mapping 1:1 onto the planner's 6 outcomes.
-- `_rule_fallback()` mirrors `safety_policy.py` thresholds **exactly**, so any oracle failure (Ollama down, timeout, unparseable output) degrades to the original deterministic behavior with zero safety regression.
-- Only invoked for `HIGH_VALUE_TOOLS`, failed calls, or while airborne — trivial read-only polling is skipped.
-- Oracle-guided workflows: `workflows/takeoff_oracle.py`, `workflows/navigation_oracle.py`.
-
 ### Key Files
 
 | File | Role |
@@ -104,8 +91,6 @@ An **opt-in** augmentation (`thinking_oracle.py` + `planner_oracle_patch.py`) th
 | `vision/avoidance/dronet_runner.py` | `DroNetRunner` + `AvoidanceState`; autonomous 20 Hz avoidance loop |
 | `vision/avoidance/run_dronet_oak.py` | Standalone DroNet CLI (unchanged by integration) |
 | `localization/vio_slam/vio_slam_runner.py` | `VIOSLAMRunner`; production VIO+SLAM background task; publishes `VIOPose` + `LiveOccupancyGrid` |
-| `thinking_oracle.py` | Opt-in qwen3:0.6b reasoning layer; `ThinkingOracle.deliberate()` (sync) |
-| `planner_oracle_patch.py` | Drop-in `Planner` replacement that calls the oracle before rule fallback |
 | `memory/mission_memory.py` | Crash-recovery state + JSONL event log (`memory_store/`) |
 | `memory/environment_memory.py` | Persistent waypoints / obstacles / no-fly zones |
 
@@ -341,6 +326,6 @@ VIO/SLAM (all read in `config.py`, default **enabled**):
 
 ## Testing
 
-Framework: `pytest` + `pytest-asyncio`. All test files are in `tests/test_drone/`. Each major subsystem has its own test file covering normal paths, error/retry paths, and state transitions — including `test_vio_slam_runner.py`, `test_occupancy_grid.py`, `test_localization.py`, and `test_thinking_oracle.py` (the oracle suite mocks `ollama.chat`, so it needs no Ollama server or hardware).
+Framework: `pytest` + `pytest-asyncio`. All test files are in `tests/test_drone/`. Each major subsystem has its own test file covering normal paths, error/retry paths, and state transitions — including `test_vio_slam_runner.py`, `test_occupancy_grid.py`, and `test_localization.py`.
 
 VIO/SLAM exploration scripts in `tests/test_depthai/` require a connected OAK-D Lite; they are standalone scripts, not pytest test cases.
