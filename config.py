@@ -97,9 +97,17 @@ VISION_CAMERA_HFOV_DEG   = float(os.environ.get("VISION_CAMERA_HFOV_DEG",   "73.
 # Set only one of {VISION_ENABLED, VIOSLAM_ENABLED} to "1" per device.
 # (VIOSLAM_STALE_SEC is hoisted earlier — see the section above.)
 VIOSLAM_ENABLED         = os.environ.get("VIOSLAM_ENABLED", "1") == "1"
-VIOSLAM_FPS             = int(os.environ.get("VIOSLAM_FPS", "5"))
-VIOSLAM_SLAM_HZ         = float(os.environ.get("VIOSLAM_SLAM_HZ", "10.0"))
+# Rate invariant for USB 2.0 on RPi 5: slam.setFreq == Rtabmap/DetectionRate <= fps.
+# At 640x400 the host RTABMap nodes pull depth (16-bit, 512 KB) + rectified GRAY8
+# (256 KB) per frame across USB; ~768 KB/frame * 10 fps ≈ 7.7 MB/s (~25% of a
+# USB2 High-Speed link) leaves comfortable headroom. SLAM runs on the RPi 5 CPU,
+# so 2 Hz keeps loop-closure/g2o within budget.
+VIOSLAM_FPS             = int(os.environ.get("VIOSLAM_FPS", "10"))
+VIOSLAM_SLAM_HZ         = float(os.environ.get("VIOSLAM_SLAM_HZ", "2.0"))   # MUST equal SLAM_PARAMS["Rtabmap/DetectionRate"]
 VIOSLAM_DB_PATH         = os.environ.get("VIOSLAM_DB_PATH", "map.db")
 VIOSLAM_LOAD_DB         = os.environ.get("VIOSLAM_LOAD_DB", "0") == "1"
 VIOSLAM_OCC_CELL_SIZE   = float(os.environ.get("VIOSLAM_OCC_CELL_SIZE", "0.05"))   # MUST equal SLAM_PARAMS["Grid/CellSize"]
 VIOSLAM_PROXIMITY_THR_M = float(os.environ.get("VIOSLAM_PROXIMITY_THR_M", "1.5"))
+# Pin the OAK-D link to USB 2.0 High-Speed (deployment target is USB2 on RPi 5).
+# Set "0" to let DepthAI auto-negotiate (e.g. on a USB3 bench setup).
+VIOSLAM_FORCE_USB2      = os.environ.get("VIOSLAM_FORCE_USB2", "1") == "1"

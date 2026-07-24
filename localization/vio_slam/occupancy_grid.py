@@ -20,7 +20,7 @@ import numpy as np
 class LiveOccupancyGrid:
     def __init__(
         self,
-        cell_size: float = 0.10,
+        cell_size: float = 0.05,   # matches config.VIOSLAM_OCC_CELL_SIZE / SLAM Grid/CellSize
         half_extent: float = 8.0,
         z_min: float = -1.0,
         z_max: float = 4.0,

@@ -120,11 +120,14 @@ class OakPipeline:
         # ── Stereo depth ──────────────────────────────────────────────────────
         stereo = pipeline.create(dai.node.StereoDepth)
 
-        # Link left and right cameras to stereo node
+        # Link left and right cameras to stereo node.
+        # DepthAI v3: request a concrete output at the OV7251 mono resolution
+        # (640x400) via requestOutput((w, h)) — the unified dai.node.Camera has
+        # no requestIspOutput(); it exposes requestOutput()/requestFullResolutionOutput().
         cam_left = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_B, sensorFps=self._fps)
         cam_right = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_C, sensorFps=self._fps)
-        cam_left.requestIspOutput().link(stereo.left)
-        cam_right.requestIspOutput().link(stereo.right)
+        cam_left.requestOutput((640, 400)).link(stereo.left)
+        cam_right.requestOutput((640, 400)).link(stereo.right)
 
         stereo.setDefaultProfilePreset(
             dai.node.StereoDepth.PresetMode.DEFAULT

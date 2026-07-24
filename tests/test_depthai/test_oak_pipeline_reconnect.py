@@ -72,18 +72,14 @@ class _FakeQueue:
 
 
 class _FakeCameraNode:
-    """Stand-in for dai.node.Camera — build() returns a node with requestIspOutput() etc."""
+    """Stand-in for dai.node.Camera — build() returns a node with requestOutput() etc."""
     def __init__(self):
-        self.isp_output = _FakeOutput("isp")
         self.requested_outputs: List[tuple] = []
 
     def build(self, socket=None, sensorFps: int = 30):
         self.socket = socket
         self.fps = sensorFps
         return self
-
-    def requestIspOutput(self):
-        return self.isp_output
 
     def requestOutput(self, size, type=None):
         out = _FakeOutput(f"preview_{size}")

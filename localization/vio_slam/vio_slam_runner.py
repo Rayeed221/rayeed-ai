@@ -48,6 +48,10 @@ class VIOSLAMRunner:
     """
     Asyncio background task that drives the OAK-D Lite VIO+SLAM pipeline.
 
+    Rate model (USB 2.0 on RPi 5): the camera and this async loop run at `fps`
+    (≈10 Hz); the SLAM node runs at `slam_hz` (2 Hz).  The invariant enforced by
+    config + rtabmap_params is `slam.setFreq == Rtabmap/DetectionRate <= fps`.
+
     Public API (all thread-safe):
         get_pose()          → latest VIOPose or None
         get_snapshot()      → latest SLAMSnapshot or None
@@ -55,9 +59,10 @@ class VIOSLAMRunner:
         run()               → coroutine; add to background_tasks in app.py
     """
 
-    # How many run() iterations between decay ticks (10 iterations ≈ 0.33 s at 30 fps)
-    DECAY_EVERY_N = 10
-    # Stereo capture resolution — matches the exploration script
+    # Obstacles fade over roughly this many seconds (decay cadence is derived
+    # from the loop period so it stays correct at any fps — see run()).
+    DECAY_INTERVAL_S = 1.0
+    # Stereo capture resolution — OV7251 mono cap on the OAK-D Lite
     _CAPTURE_WIDTH = 640
     _CAPTURE_HEIGHT = 400
 
@@ -70,11 +75,13 @@ class VIOSLAMRunner:
         slam_hz: float,
         occ_cell_size: float,
         pose_cache,
+        force_usb2: bool = True,
     ):
         self._db_path        = db_path
         self._load_db        = load_db
         self._fps            = fps
         self._slam_hz        = slam_hz
+        self._force_usb2     = force_usb2
         self._pose_cache     = pose_cache
         self._occ_grid       = LiveOccupancyGrid(cell_size=occ_cell_size)
 
@@ -99,7 +106,10 @@ class VIOSLAMRunner:
     # ── Main coroutine ────────────────────────────────────────────────────────
 
     async def run(self) -> None:
-        """20–30 Hz VIO + SLAM loop.  Non-fatal on any setup failure."""
+        """VIO loop at `fps` (≈10 Hz); SLAM node at `slam_hz` (2 Hz).
+
+        Non-fatal on any setup failure.
+        """
         try:
             import depthai  # noqa: F401
         except ImportError:
@@ -119,6 +129,9 @@ class VIOSLAMRunner:
 
         q_vio_transform, q_slam_transform, q_obstacle_pcl = queues
         period_s = 1.0 / max(1, self._fps)
+        # Decay every N iterations so stale obstacles fade over ~DECAY_INTERVAL_S,
+        # independent of fps (at 10 fps: 0.1 s period → decay every 10 iters ≈ 1 s).
+        decay_every = max(1, round(self.DECAY_INTERVAL_S / period_s))
         iter_count = 0
 
         try:
@@ -156,7 +169,7 @@ class VIOSLAMRunner:
 
                 # ── 3. Periodic decay so stale obstacles fade ──
                 iter_count += 1
-                if iter_count % self.DECAY_EVERY_N == 0:
+                if iter_count % decay_every == 0:
                     self._occ_grid.decay(amount=1)
 
                 await asyncio.sleep(period_s)
@@ -183,7 +196,23 @@ class VIOSLAMRunner:
         """
         import depthai as dai
 
-        p = dai.Pipeline()
+        # Pin the OAK-D link to USB 2.0 High-Speed on the deployment platform
+        # (RPi 5, USB2 cable).  DepthAI v3 creates the Device implicitly on
+        # p.start(), so to force the speed we build the Device up-front
+        # (dai.Device(maxUsbSpeed)) and hand it to dai.Pipeline(defaultDevice).
+        # Falls back to auto-negotiation if pinning fails (non-fatal).
+        p = None
+        if self._force_usb2:
+            try:
+                device = dai.Device(dai.UsbSpeed.HIGH)   # HIGH == USB 2.0 (480 Mbps)
+                p = dai.Pipeline(device)
+                logger.info("[VIOSLAM] Device pinned to USB 2.0 High-Speed")
+            except Exception as exc:
+                logger.warning(
+                    f"[VIOSLAM] USB2 pin failed ({exc}); using auto-negotiated speed"
+                )
+        if p is None:
+            p = dai.Pipeline()
 
         # ── Cameras (mono left/right via unified Camera.build) ────────────────
         cam_left  = p.create(dai.node.Camera).build(

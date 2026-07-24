@@ -38,6 +38,7 @@ from config import (
     DRONET_MODEL_PATH,
     VIOSLAM_ENABLED, VIOSLAM_DB_PATH, VIOSLAM_LOAD_DB,
     VIOSLAM_FPS, VIOSLAM_SLAM_HZ, VIOSLAM_OCC_CELL_SIZE,
+    VIOSLAM_FORCE_USB2,
 )
 from schemas import ToolResponse
 from state_machine import StateMachine
@@ -228,6 +229,7 @@ class DroneAI:
                 slam_hz=VIOSLAM_SLAM_HZ,
                 occ_cell_size=VIOSLAM_OCC_CELL_SIZE,
                 pose_cache=self.pose_cache,
+                force_usb2=VIOSLAM_FORCE_USB2,
             )
             self.safety.set_vioslam_runner(self.vioslam_runner)
 

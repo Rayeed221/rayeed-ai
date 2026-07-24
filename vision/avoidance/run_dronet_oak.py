@@ -10,14 +10,15 @@ Prerequisites:
     3. python convert_to_blob.py          # creates dronet_tiny.blob
     4. Connect OAK-D Lite via USB
 
-Pipeline:
-    LEFT mono camera (CAM_B, 1280×800, native grayscale)
+Pipeline (DepthAI v3 — queues created directly on node outputs via
+node.output.createOutputQueue(), no XLinkOut nodes):
+    LEFT mono camera (CAM_B, native grayscale)
         ├─► ImageManip  (crop 245,72→1035,728 then resize 200×200)
         │       ├─► NeuralNetwork (dronet_tiny.blob)
-        │       │       └─► XLinkOut "nn"       → steer + coll from CNN
-        │       └─► XLinkOut "preview"          → 200×200 frame for display
+        │       │       └─► nn.out.createOutputQueue()    → steer + coll from CNN
+        │       └─► manip.out.createOutputQueue()         → 200×200 frame for display
         └─► StereoDepth (with RIGHT camera)
-                └─► XLinkOut "depth"            → depth map for safety override
+                └─► stereo.depth.createOutputQueue()      → depth map for safety override
 
 == Why LEFT mono camera instead of RGB ==
 The model was trained on images from the Himax HM01B0 — a monochrome

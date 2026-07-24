@@ -220,7 +220,7 @@ RTABMapVIO.passthroughDepth → RTABMapSLAM.depth
 `RTABMapSLAM.setParams()` — all string-valued:
 
 - `slam.setFreq(2.0)` — SLAM node runs at 2 Hz (VIO runs at camera fps)
-- `Rtabmap/DetectionRate`: `"1.0"` or `"2.0"` — mirror `setFreq()`
+- `Rtabmap/DetectionRate`: **must equal** `slam.setFreq()` (both `2.0`) and be **≤ `VIOSLAM_FPS`** — frames only arrive at camera fps, so a higher SLAM rate cannot be honored
 - `Mem/IncrementalMemory`: `"1"` (mapping) vs `"0"` (localization-only mode)
 - `slam.setLoadDatabaseOnStart(True)` — for relocalization into a previously saved map
 - `slam.setSaveDatabasePeriod(60.0)` — auto-save interval in seconds
@@ -334,7 +334,8 @@ VIO/SLAM (all read in `config.py`, default **enabled**):
 
 - `VIOSLAM_ENABLED` — default `1`; owns the OAK-D VIO+SLAM background task
 - `VIOSLAM_DB_PATH` (`map.db`) / `VIOSLAM_LOAD_DB` (`0`) — RTAB-Map DB path and relocalization-load flag
-- `VIOSLAM_FPS` (`5`) / `VIOSLAM_SLAM_HZ` (`10.0`) — camera and SLAM node rates
+- `VIOSLAM_FPS` (`10`) / `VIOSLAM_SLAM_HZ` (`2.0`) — camera/VIO-loop rate and SLAM node rate. Tuned for a **USB 2.0 link on RPi 5**: at 640×400 the host RTABMap nodes pull ~768 KB/frame (depth + rectified) over USB, so ~7.7 MB/s at 10 fps stays well under the USB2 ceiling; SLAM runs on the RPi 5 CPU, hence 2 Hz. Invariant: `VIOSLAM_SLAM_HZ == SLAM_PARAMS["Rtabmap/DetectionRate"] ≤ VIOSLAM_FPS`.
+- `VIOSLAM_FORCE_USB2` — default `1`; pins the OAK-D to USB 2.0 High-Speed (`dai.Device(dai.UsbSpeed.HIGH)` → `dai.Pipeline(device)`). Set `0` to auto-negotiate on a USB3 bench setup.
 - `VIOSLAM_OCC_CELL_SIZE` (`0.05`) — **must equal** `SLAM_PARAMS["Grid/CellSize"]`
 - `VIOSLAM_PROXIMITY_THR_M` (`1.5`) / `VIOSLAM_STALE_SEC` (`0.5`) — SLAM proximity gate distance and pose-freshness bound
 

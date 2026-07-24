@@ -1,7 +1,8 @@
 """
 RTAB-Map parameter dicts for dai.node.RTABMapVIO and dai.node.RTABMapSLAM.
 
-Copied verbatim from tests/test_depthai/testing/depthai-vio-slam-exploration.py.
+Derived from tests/test_depthai/testing/depthai-vio-slam-exploration.py, then
+re-tuned for a USB 2.0 link on a Raspberry Pi 5 (10 fps VIO / 2 Hz SLAM).
 
 LOCKED INVARIANTS (do NOT change without coordinated re-tuning):
 
@@ -13,6 +14,8 @@ LOCKED INVARIANTS (do NOT change without coordinated re-tuning):
   - VIO_PARAMS["Vis/MaxDepth"]  == "4.0", VIO_PARAMS["Vis/MinDepth"] == "0.3"
   - SLAM_PARAMS["Grid/3D"]      == "1"   (required for slam.obstaclePCL output)
   - SLAM_PARAMS["Grid/CellSize"]== "0.05" MUST equal config.VIOSLAM_OCC_CELL_SIZE
+  - SLAM_PARAMS["Rtabmap/DetectionRate"] == str(config.VIOSLAM_SLAM_HZ) and MUST
+    equal slam.setFreq(); both MUST be <= config.VIOSLAM_FPS (frames arrive at fps)
 
 All values are strings — RTABMap parses them itself.  Numeric values must use
 "." as decimal separator regardless of locale (set LC_NUMERIC=C in the runner).
@@ -112,7 +115,7 @@ VIO_PARAMS: dict = {
 SLAM_PARAMS: dict = {
 
     # ── RTABMap core ──────────────────────────────────────────────
-    "Rtabmap/DetectionRate":              "1.0",   # Hz — mirror slam.setFreq()
+    "Rtabmap/DetectionRate":              "2.0",   # Hz — MUST equal slam.setFreq() == config.VIOSLAM_SLAM_HZ (<= fps)
     "Rtabmap/TimeThr":                    "0.0",
     "Rtabmap/MemoryThr":                  "0",
     "Rtabmap/LoopThr":                    "0.11",
@@ -249,7 +252,7 @@ SLAM_PARAMS: dict = {
 
     # ── Pose graph optimiser ──────────────────────────────────────
     "Optimizer/Strategy":                 "1",     # 0=TORO  1=g2o  2=GTSAM  3=Ceres
-    "Optimizer/Iterations":               "100",
+    "Optimizer/Iterations":               "20",    # g2o converges well within 20; keeps RPi 5 CPU cost low at each detection tick
     "Optimizer/Robust":                   "1",
     "Optimizer/VarianceIgnored":          "0",
     "Optimizer/LandmarksIgnored":         "0",
