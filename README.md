@@ -200,7 +200,7 @@ rayeed-ai/
 │
 └── tests/
     ├── test_drone/            pytest suite (Sim backend, no hardware needed)
-    └── test_depthai/          Standalone OAK-D reference scripts (need hardware)
+    └── test_depthai/          OAK-D pipeline reconnect unit test (faked dai)
 ```
 
 ---

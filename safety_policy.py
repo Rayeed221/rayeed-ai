@@ -24,8 +24,7 @@ _AVOIDANCE_GATED: frozenset = frozenset({"goto_position", "set_speed"})
 
 
 def _quat_forward(qw: float, qx: float, qy: float, qz: float) -> tuple:
-    """Unit forward vector (camera Z axis) from a quaternion.  See
-    tests/test_depthai/testing/live_slam_avoidance_FINAL.py:222 for reference."""
+    """Unit forward vector (camera Z axis) from a quaternion."""
     fx = 2.0 * (qx * qz + qw * qy)
     fy = 2.0 * (qy * qz - qw * qx)
     fz = 1.0 - 2.0 * (qx * qx + qy * qy)

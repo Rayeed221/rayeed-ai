@@ -29,15 +29,6 @@ pytest tests/test_drone/test_state_machine.py -v
 
 # Run tests with async support
 pytest tests/test_drone/test_failures.py -v
-
-# Run VIO-only pipeline (standalone, no SLAM, 60 fps)
-python tests/test_depthai/rtab_map_VIO-60fps.py
-
-# Run VIO + SLAM pipeline (standalone exploration)
-python tests/test_depthai/testing/depthai-vio-slam-exploration.py
-
-# Run live SLAM + 3D path planner (standalone)
-python tests/test_depthai/testing/live_slam_avoidance_FINAL.py [--load] [--db path/to.db]
 ```
 
 ## Architecture
@@ -132,7 +123,7 @@ Both adapters implement the same interface from `adapters/base_adapter.py`. Swit
 
 ### Current State (Production-Wired)
 
-VIO/SLAM is **now integrated** as the package `localization/vio_slam/` and runs as a background task in `app.py` when `VIOSLAM_ENABLED=1` (the default). The `tests/test_depthai/` scripts remain as standalone hardware references, but the production runner (`VIOSLAMRunner`) mirrors `vision/avoidance/dronet_runner.py` 1:1: lazy `import depthai` inside `run()`, all blocking DepthAI calls wrapped in `asyncio.to_thread()`, thread-safe state behind one lock, cooperative cancel via `CancelledError`.
+VIO/SLAM is **now integrated** as the package `localization/vio_slam/` and runs as a background task in `app.py` when `VIOSLAM_ENABLED=1` (the default). The production runner (`VIOSLAMRunner`) mirrors `vision/avoidance/dronet_runner.py` 1:1: lazy `import depthai` inside `run()`, all blocking DepthAI calls wrapped in `asyncio.to_thread()`, thread-safe state behind one lock, cooperative cancel via `CancelledError`.
 
 **Production package (`localization/vio_slam/`):**
 
@@ -157,15 +148,13 @@ Three files handle coordinate enrichment today, replacing GPS-only reasoning wit
 - **`localization/pose_cache.py`** — Thread-safe `PoseCache`: merges heading/altitude from `TelemetryReader` and lat/lon from `PositionMonitor`. Staleness check (invalid if any field missing or >10s old).
 - **`localization/localizer.py`** — Enriches vision detections with `local_frame` coordinates. Stores `GlobalObservation` deque for AI reasoning. Handles stale pose gracefully.
 
-### VIO/SLAM Exploration Files
+### VIO/SLAM Pipeline Topology
 
-All exploration scripts use the **DepthAI v3 API** with `dai.Pipeline() as p` context manager.
-
-**Pipeline topology** (same in all files):
+Built in `localization/vio_slam/vio_slam_runner.py` with the **DepthAI v3 API**:
 
 ```text
 CAM_B + CAM_C (stereo)
-  → StereoDepth (HIGH_DENSITY, depth aligned to CAM_B)
+  → StereoDepth (depth aligned to CAM_B)
       ├── rectifiedLeft → FeatureTracker (HARRIS, 1000 features)
       │       ├── passthroughInputImage → RTABMapVIO.rect
       │       └── outputFeatures → RTABMapVIO.features
@@ -177,17 +166,8 @@ RTABMapVIO.passthroughRect → RTABMapSLAM.rect
 RTABMapVIO.passthroughDepth → RTABMapSLAM.depth
 ```
 
-**Key exploration files:**
-
-| File | Purpose |
-| --- | --- |
-| `tests/test_depthai/rtab_map_VIO-60fps.py` | Minimal VIO-only at 60 fps; logs pose quaternion to console |
-| `tests/test_depthai/rtab_map_SLAM-60fps.py` | VIO + SLAM at 60 fps; same topology |
-| `tests/test_depthai/testing/depthai-vio-slam-exploration.py` | Full parameter-annotated VIO+SLAM reference (use this as template); saves to `map.db` |
-| `tests/test_depthai/testing/live_slam_avoidance_FINAL.py` | SLAM + 3D A* path planner; reads `slam.obstaclePCL` → `LiveOccupancyGrid` → `FastPlanner3D`; `--load` flag for relocalization |
-| `tests/test_depthai/testing/path_planner_3d.py` | Standalone `FastPlanner3D` with visualization |
-| `tests/test_depthai/testing/rtab_map_SLAM_enhanced.py` | Enhanced SLAM with additional outputs |
-| `tests/test_depthai/testing/RTABMAP_PARAMETERS_REFERENCE.md` | Full RTAB-Map parameter reference for the DepthAI node |
+`RTABMapVIO` and `RTABMapSLAM` are host (`ThreadedHostNode`) nodes — they run on
+the RPi 5 CPU; the rest runs on the OAK-D Lite's Myriad X.
 
 ### VIO Parameters (Key Knobs)
 
@@ -229,7 +209,9 @@ RTABMapVIO.passthroughDepth → RTABMapSLAM.depth
 
 ### map.db
 
-`map.db` in the repo root is a saved RTAB-Map database from previous exploration sessions (~75 MB, gitignored). Load it with `slam.setLoadDatabaseOnStart(True)` and `slam.setDatabasePath("./map.db")` for relocalization testing.
+`map.db` (repo root, gitignored) is the RTAB-Map database. The runner writes it
+via `VIOSLAM_DB_PATH` and auto-saves every 60 s; set `VIOSLAM_LOAD_DB=1` to load
+a saved map on start for relocalization.
 
 ## MAVLink Adapter Implementation
 
@@ -326,6 +308,4 @@ VIO/SLAM (all read in `config.py`, default **enabled**):
 
 ## Testing
 
-Framework: `pytest` + `pytest-asyncio`. All test files are in `tests/test_drone/`. Each major subsystem has its own test file covering normal paths, error/retry paths, and state transitions — including `test_vio_slam_runner.py`, `test_occupancy_grid.py`, and `test_localization.py`.
-
-VIO/SLAM exploration scripts in `tests/test_depthai/` require a connected OAK-D Lite; they are standalone scripts, not pytest test cases.
+Framework: `pytest` + `pytest-asyncio`. Most test files are in `tests/test_drone/` — each major subsystem has its own file covering normal paths, error/retry paths, and state transitions (including `test_vio_slam_runner.py`, `test_occupancy_grid.py`, `test_localization.py`). `tests/test_depthai/test_oak_pipeline_reconnect.py` covers the OAK-D pipeline reconnect logic using a faked `depthai` module (no hardware needed).

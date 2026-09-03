@@ -1,51 +1,56 @@
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
+*.egg
+*.egg-info/
+.installed.cfg
+MANIFEST
+
+# Virtual envs
 .venv/
 venv/
 ENV/
 env/
 .env
+
+# Build / dist
+build/
+dist/
+downloads/
+eggs/
+.eggs/
+sdist/
+wheels/
+var/
+
+# Test / type caches
 .pytest_cache/
 .coverage
 htmlcov/
 .mypy_cache/
 .tox/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-.DS_Store
-memory_store/*
-helper_codes/
-external_codes\logs
-cache/
-.claude/
-external_codes/logsmap.db
-*.db
 
-# YOLO blob files (large, generated locally)
+# Editor / OS
+.DS_Store
+.claude/
+
+# Runtime artifacts
+memory_store/*
+.cache/
+cache/
+resume.txt
+
+# MAVLink telemetry logs
+mav*
+
+# Audio captures / TTS output
+*.wav
+
+# RTAB-Map databases
+*.db
+map.db-journal
+
+# OAK-D model blobs (large, generated locally)
 vision/models/*.blob
 !vision/models/.gitkeep
-vision/standalone/continuous_embedded_recordings
-external_codes/logs
-tests/test_depthai/.cache
-vision/avoidance/.cache
-vision/standalone/.cache
-map.db-journal
-resume.txt
-.cache/
-mav*

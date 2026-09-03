@@ -6,7 +6,7 @@ Publishes AvoidanceState (thread-safe) and sends MAVLink velocity commands
 directly when collision_prob exceeds COLL_THRESH.
 
 This module never goes through the LLM or tool pipeline.
-See AVOIDANCE_INTEGRATION_PLAN.txt for the two-layer architecture.
+See README.md for the two-layer architecture.
 """
 
 import asyncio

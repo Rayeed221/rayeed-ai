@@ -1,9 +1,7 @@
 """
 Rolling 3D occupancy grid updated from SLAM obstacle point clouds.
 
-Lifted from tests/test_depthai/testing/live_slam_avoidance_FINAL.py (the
-exploration script).  Pure NumPy — no DepthAI dependency, fully testable
-without hardware.
+Pure NumPy — no DepthAI dependency, fully testable without hardware.
 
 Conventions:
   - Coordinates are in the VIO start frame (metres).

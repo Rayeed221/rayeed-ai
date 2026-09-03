@@ -1,8 +1,7 @@
 """
 RTAB-Map parameter dicts for dai.node.RTABMapVIO and dai.node.RTABMapSLAM.
 
-Derived from tests/test_depthai/testing/depthai-vio-slam-exploration.py, then
-re-tuned for a USB 2.0 link on a Raspberry Pi 5 (10 fps VIO / 2 Hz SLAM).
+Tuned for a USB 2.0 link on a Raspberry Pi 5 (10 fps VIO / 2 Hz SLAM).
 
 LOCKED INVARIANTS (do NOT change without coordinated re-tuning):
 
