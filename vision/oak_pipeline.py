@@ -201,8 +201,6 @@ class OakPipeline:
         attempts were exhausted (caller may want to surface a hard failure to
         the user or trigger a higher-level recovery).
         """
-        import depthai as dai
-
         if self._pipeline is not None and self._pipeline.isRunning():
             return True  # nothing to do
 

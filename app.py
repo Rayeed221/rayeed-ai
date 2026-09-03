@@ -19,7 +19,6 @@ Run (real drone):
 
 import asyncio
 import logging
-import os
 import traceback
 from pathlib import Path
 
@@ -34,7 +33,6 @@ from config import (
     VISION_BLOB_NAME, VISION_BLOB_SHAVES,
     VISION_CAMERA_PITCH_DEG, VISION_CAMERA_YAW_DEG, VISION_CAMERA_HFOV_DEG,
     YOLO_BLOB_DIR, YOLO_AUTO_DOWNLOAD,
-    AUDIO_DEVICE_ID,
     DRONET_MODEL_PATH,
     VIOSLAM_ENABLED, VIOSLAM_DB_PATH, VIOSLAM_LOAD_DB,
     VIOSLAM_FPS, VIOSLAM_SLAM_HZ, VIOSLAM_OCC_CELL_SIZE,

@@ -97,7 +97,6 @@ WHITE  = (255, 255, 255)
 GREEN  = (0,   200, 0)
 RED    = (0,   0,   220)
 YELLOW = (0,   200, 200)
-BLUE   = (220, 100, 0)
 ORANGE = (0,   140, 255)
 
 
@@ -534,8 +533,6 @@ def get_vertical_bias(depth_frame: np.ndarray) -> float:
 # ---------------------------------------------------------------------------
 
 def run(blob_path: Path, use_depth: bool = True, mav: "MavlinkBridge | None" = None):
-    import depthai as dai
-
     if not blob_path.exists():
         print(f"ERROR: blob not found at {blob_path}")
         print("Run the following steps first:")

@@ -5,12 +5,8 @@ load_dotenv()
 
 # ─── API ────────────────────────────────────────────────────────────────────
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-GROQ_API_KEY   = os.environ.get("GROQ_API_KEY")
 
 MODEL = "models/gemini-3.1-flash-live-preview"
-
-# ─── Groq ────────────────────────────────────────────────────────────────────
-GROQ_MODEL        = os.environ.get("GROQ_MODEL", "qwen/qwen3-32b")
 
 # ─── Audio ──────────────────────────────────────────────────────────────────
 SEND_SAMPLE_RATE    = int(os.environ.get("SEND_SAMPLE_RATE", "16000"))
@@ -34,10 +30,6 @@ MAX_SPEED_MS          = 15.0      # m/s — hard limit
 TELEMETRY_STALE_SEC   = 5.0       # seconds → planner wait
 EMERGENCY_STALE_SEC   = 10.0      # seconds → failsafe
 MAX_RETRY_COUNT       = 3         # before abort
-
-# ─── Planner ────────────────────────────────────────────────────────────────
-WAIT_POLL_INTERVAL   = 0.2        # seconds between wait checks
-PLANNER_LOOP_INTERVAL = 0.1       # seconds between planner ticks
 
 # ─── State Persistence ──────────────────────────────────────────────────────
 STATE_FILE  = "mission_state.json"
@@ -80,9 +72,6 @@ YOLO_AUTO_DOWNLOAD  = os.environ.get("YOLO_AUTO_DOWNLOAD", "1") == "1"
 # Adjust these when the OAK-D Lite is not mounted level and forward-facing.
 VISION_CAMERA_PITCH_DEG  = float(os.environ.get("VISION_CAMERA_PITCH_DEG",  "0.0"))
 VISION_CAMERA_YAW_DEG    = float(os.environ.get("VISION_CAMERA_YAW_DEG",    "0.0"))
-VISION_CAMERA_OFFSET_F_M = float(os.environ.get("VISION_CAMERA_OFFSET_F_M", "0.0"))
-VISION_CAMERA_OFFSET_R_M = float(os.environ.get("VISION_CAMERA_OFFSET_R_M", "0.0"))
-VISION_CAMERA_OFFSET_D_M = float(os.environ.get("VISION_CAMERA_OFFSET_D_M", "0.0"))
 # OAK-D Lite RGB camera horizontal field of view (degrees)
 VISION_CAMERA_HFOV_DEG   = float(os.environ.get("VISION_CAMERA_HFOV_DEG",   "73.0"))
 

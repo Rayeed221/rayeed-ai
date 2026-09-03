@@ -1,5 +1,4 @@
 import asyncio
-import numpy as np
 import sounddevice as sd
 import logging
 
@@ -49,20 +48,6 @@ def get_default_input_device():
             logger.info(f"[MIC] Using system default device: {default_device} - {devices[default_device]['name']}")
             return default_device
 
-        # Fallback: use first available input device
-        first_device = min(devices.keys())
-        logger.info(f"[MIC] Using first available device: {first_device} - {devices[first_device]['name']}")
-        return first_device
-    except Exception as e:
-        logger.error(f"[MIC] Error detecting input device: {e}")
-        return None
-
-        default_device = sd.default.device[0]  # Input device
-        print(f"[MIC] System default input device: {default_device} - {devices.get(default_device, {}).get('name', 'Unknown')}")
-        if default_device in devices:
-            logger.info(f"[MIC] Using system default device: {default_device} - {devices[default_device]['name']}")
-            return default_device
-        
         # Fallback: use first available input device
         first_device = min(devices.keys())
         logger.info(f"[MIC] Using first available device: {first_device} - {devices[first_device]['name']}")

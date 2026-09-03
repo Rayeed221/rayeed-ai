@@ -55,11 +55,6 @@ class LiveOccupancyGrid:
     def _in_bounds(self, gx: int, gy: int, gz: int) -> bool:
         return 0 <= gx < self.nx and 0 <= gy < self.ny and 0 <= gz < self.nz
 
-    def is_free(self, gx: int, gy: int, gz: int) -> bool:
-        if not self._in_bounds(gx, gy, gz):
-            return False
-        return self.grid[gx, gy, gz] < self.obstacle_thresh
-
     # ── Updates from point cloud data ─────────────────────────────────────────
 
     def insert_obstacle_points(self, points, inflate_cells: int = 2) -> None:
@@ -72,23 +67,6 @@ class LiveOccupancyGrid:
                         nx, ny, nz = cx + dx, cy + dy, cz + dz
                         if self._in_bounds(nx, ny, nz):
                             self.grid[nx, ny, nz] += 1
-
-    def mark_free_along_ray(self, origin, point, step: Optional[float] = None) -> None:
-        """Decrement obstacle counts along a ray (free-space carving)."""
-        if step is None:
-            step = self.cell_size
-        direction = np.array(point) - np.array(origin)
-        dist = float(np.linalg.norm(direction))
-        if dist < 1e-6:
-            return
-        direction = direction / dist
-        t = 0.0
-        while t < dist - step:
-            p = np.array(origin) + direction * t
-            gx, gy, gz = self._w2g(p[0], p[1], p[2])
-            if self._in_bounds(gx, gy, gz):
-                self.grid[gx, gy, gz] = max(0, int(self.grid[gx, gy, gz]) - 1)
-            t += step
 
     def decay(self, amount: int = 1) -> None:
         """Reduce obstacle counts so stale obstacles fade."""

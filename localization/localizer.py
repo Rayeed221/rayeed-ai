@@ -20,7 +20,6 @@ silent side-effect — no error is raised if GPS is unavailable.
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Optional
 
 from localization.frame_transforms import (
     camera_to_frd,
@@ -99,7 +98,6 @@ class Localizer:
         z_mm = det.get("z_mm", 0)
 
         pose = self._pose_cache.get()
-        heading = pose.heading_deg if pose else 0.0
 
         f_m, r_m, d_m = camera_to_frd(
             x_mm, y_mm, z_mm,
