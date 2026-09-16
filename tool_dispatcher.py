@@ -17,7 +17,12 @@ import logging
 import time
 from typing import Optional
 
-from config import AVOIDANCE_COLLISION_THR, VIOSLAM_STALE_SEC
+from config import (
+    AVOIDANCE_COLLISION_THR,
+    VIOSLAM_STALE_SEC,
+    MAVLINK_WAIT_ALTITUDE_SEC,
+    MAVLINK_WAIT_ARRIVAL_SEC,
+)
 from schemas import ToolResponse, WaitInstruction
 from state_machine import StateMachine, MissionState, IllegalTransitionError
 from safety_policy import SafetyPolicy
@@ -68,6 +73,28 @@ TOOL_WAIT_HINTS = {
 
 TOOL_TIMEOUT_SEC = 10.0
 
+# ── Per-tool execution deadlines ──────────────────────────────────────────────
+# A single 10 s budget guaranteed a timeout for every blocking wait_* tool:
+# the adapter waits up to 60 s / 120 s for altitude / arrival, so the dispatcher
+# cut it off at 10 s, returned next_action="retry", and burned a retry (plus an
+# LLM round trip) on every takeoff — while the orphaned thread kept running.
+# Each wait tool now gets a budget that matches what it is actually waiting for.
+TOOL_TIMEOUTS = {
+    "connect_drone": 20.0,                            # wait_heartbeat is 15 s
+    "wait_altitude": MAVLINK_WAIT_ALTITUDE_SEC + 5.0,
+    "wait_arrival":  MAVLINK_WAIT_ARRIVAL_SEC  + 5.0,
+}
+
+
+def timeout_for(tool_name: str, args: dict) -> float:
+    """Execution deadline for one tool call."""
+    if tool_name == "wait_time":
+        try:
+            return float(args.get("seconds", 0.0)) + 5.0
+        except (TypeError, ValueError):
+            return TOOL_TIMEOUT_SEC
+    return TOOL_TIMEOUTS.get(tool_name, TOOL_TIMEOUT_SEC)
+
 
 class ToolDispatcher:
     def __init__(
@@ -110,17 +137,18 @@ class ToolDispatcher:
             )
 
         # ── 3. Execute via adapter with timeout ───────────────────────────────
+        deadline = timeout_for(tool_name, args)
         try:
             result = await asyncio.wait_for(
                 asyncio.to_thread(self._adapter.execute, tool_name, args),
-                timeout=TOOL_TIMEOUT_SEC,
+                timeout=deadline,
             )
         except asyncio.TimeoutError:
             self._safety.increment_retry(tool_name)
-            logger.warning(f"[DISPATCH] Timeout: {tool_name}")
+            logger.warning(f"[DISPATCH] Timeout: {tool_name} ({deadline}s)")
             return ToolResponse.failure(
                 tool=tool_name, state=current_state.value,
-                error=f"'{tool_name}' timed out after {TOOL_TIMEOUT_SEC}s",
+                error=f"'{tool_name}' timed out after {deadline}s",
                 next_action="retry",
             )
         except Exception as exc:

@@ -31,6 +31,18 @@ BACKEND     = os.environ.get("DRONE_BACKEND", "mavlink")
 
 MAVLINK_URI = os.environ.get("MAVLINK_URI", "tcp:127.0.0.1:5760")
 
+# ─── MAVLink latency tuning ─────────────────────────────────────────────────
+# One reader thread owns the socket and caches the latest message per type
+# (adapters/mavlink_cache.py); handlers read that cache instead of issuing a
+# blocking recv_match().  MAVLINK_CACHE_MAX_AGE_SEC bounds how stale a cached
+# reading may be before a handler waits for a fresh one — telemetry streams are
+# requested at 10 Hz, so the cache is normally ~100 ms old and reads cost ~0 ms.
+MAVLINK_CACHE_MAX_AGE_SEC = float(os.environ.get("MAVLINK_CACHE_MAX_AGE_SEC", "0.5"))
+MAVLINK_ACK_TIMEOUT_SEC   = float(os.environ.get("MAVLINK_ACK_TIMEOUT_SEC",   "3.0"))
+MAVLINK_MODE_CONFIRM_SEC  = float(os.environ.get("MAVLINK_MODE_CONFIRM_SEC",  "3.0"))
+MAVLINK_WAIT_ALTITUDE_SEC = float(os.environ.get("MAVLINK_WAIT_ALTITUDE_SEC", "60.0"))
+MAVLINK_WAIT_ARRIVAL_SEC  = float(os.environ.get("MAVLINK_WAIT_ARRIVAL_SEC",  "120.0"))
+
 # ─── Safety Thresholds ──────────────────────────────────────────────────────
 BATTERY_CRITICAL_PCT  = 15        # % → trigger emergency
 BATTERY_LOW_PCT       = 25        # % → warn + restrict
@@ -44,11 +56,35 @@ MAX_RETRY_COUNT       = 3         # before abort
 WAIT_POLL_INTERVAL   = 0.2        # seconds between wait checks
 PLANNER_LOOP_INTERVAL = 0.1       # seconds between planner ticks
 
+# ─── Oracle (ThinkingOracle — qwen3:0.6b via Ollama) ────────────────────────
+# The oracle sits between the dispatcher and the tool result the LLM is waiting
+# for, so every millisecond it spends is added to the voice round trip.  The
+# reflex tier (planner.py) resolves nominal outcomes deterministically and only
+# escalates genuinely ambiguous ones here.
+ORACLE_ENABLED       = os.environ.get("ORACLE_ENABLED", "1") == "1"
+# Hard deadline enforced by the planner.  On expiry the deterministic rule
+# fallback answers instead — the decision is never delayed past this.
+ORACLE_DEADLINE_SEC  = float(os.environ.get("ORACLE_DEADLINE_SEC", "1.5"))
+# Chain-of-thought is the dominant cost for a 0.6B model and buys nothing for a
+# six-way classification.  Set to 1 only when debugging the oracle's reasoning.
+ORACLE_THINK         = os.environ.get("ORACLE_THINK", "0") == "1"
+ORACLE_NUM_PREDICT   = int(os.environ.get("ORACLE_NUM_PREDICT", "32"))
+# Keep the model resident in Ollama so no decision pays a cold model load.
+ORACLE_KEEP_ALIVE    = os.environ.get("ORACLE_KEEP_ALIVE", "30m")
+ORACLE_PREWARM       = os.environ.get("ORACLE_PREWARM", "1") == "1"
+
 # ─── State Persistence ──────────────────────────────────────────────────────
 STATE_FILE  = "mission_state.json"
 MEMORY_DIR  = "memory_store"
 
 # ─── Voice ──────────────────────────────────────────────────────────────────
+# Sounddevice output latency hint: "low" | "high" | float seconds.  The
+# PortAudio default ("high") adds ~100 ms+ of buffering to every AI reply.
+AUDIO_OUTPUT_LATENCY    = os.environ.get("AUDIO_OUTPUT_LATENCY", "low")
+# Compact tool results sent back to the Live model: drop null/default fields
+# and the epoch timestamp the model never reads.  ~35 fewer tokens per call.
+COMPACT_TOOL_RESPONSE   = os.environ.get("COMPACT_TOOL_RESPONSE", "1") == "1"
+
 VOICE_NAME              = "Sadachbia"
 CONTEXT_TRIGGER_TOKENS  = 104857
 CONTEXT_TARGET_TOKENS   = 52428

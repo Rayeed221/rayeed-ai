@@ -5,7 +5,7 @@ Covers:
   - JSON parsing from content and thinking block
   - Rule fallback thresholds (mirror safety_policy.py)
   - ThinkingDecision field validation
-  - Oracle gate (_should_invoke)
+  - Oracle gate (should_invoke) + compact output grammar
   - Stats tracking
 
 Run:
@@ -183,18 +183,23 @@ def test_from_dict_none_wait_sec(oracle):
 
 # ── Oracle gate ───────────────────────────────────────────────────────────────
 
-def test_should_invoke_high_value_tool(oracle):
-    assert oracle.should_invoke("goto_position", ok=True, airborne=False) is True
-    assert oracle.should_invoke("arm_drone",     ok=True, airborne=False) is True
-    assert oracle.should_invoke("takeoff",       ok=True, airborne=False) is True
+def test_should_invoke_only_on_critical_failure(oracle):
+    """
+    The gate narrowed deliberately: a *successful* high-value call and merely
+    being airborne are not ambiguous, and invoking a local LLM for them put a
+    full generation inside every voice round trip.  Planner.reflex() now owns
+    this decision; should_invoke is the coarse gate for callers outside it.
+    """
+    assert oracle.should_invoke("goto_position", ok=False, airborne=False) is True
+    assert oracle.should_invoke("arm_drone",     ok=False, airborne=True)  is True
+
+    assert oracle.should_invoke("goto_position", ok=True,  airborne=False) is False
+    assert oracle.should_invoke("takeoff",       ok=True,  airborne=True)  is False
 
 
-def test_should_invoke_on_failure(oracle):
-    assert oracle.should_invoke("get_telemetry", ok=False, airborne=False) is True
-
-
-def test_should_invoke_airborne(oracle):
-    assert oracle.should_invoke("get_telemetry", ok=True, airborne=True) is True
+def test_should_not_invoke_for_trivial_read(oracle):
+    assert oracle.should_invoke("get_telemetry", ok=False, airborne=False) is False
+    assert oracle.should_invoke("get_telemetry", ok=True,  airborne=True)  is False
 
 
 def test_should_not_invoke_read_only_grounded(oracle):
@@ -222,14 +227,14 @@ def test_stats_increments_on_ollama_failure(oracle):
 
 
 def test_stats_no_failure_on_successful_parse(oracle):
-    mock_chunk = MagicMock()
-    mock_chunk.message.thinking = ""
-    mock_chunk.message.content  = (
+    """Non-streaming path (ORACLE_THINK=0, the default)."""
+    mock_resp = MagicMock()
+    mock_resp.message.content = (
         '{"decision": "CONTINUE", "next_tool": null, '
         '"wait_sec": null, "reason": "ok", "confidence": 0.99}'
     )
 
-    with patch("ollama.chat", return_value=iter([mock_chunk])):
+    with patch("ollama.chat", return_value=mock_resp):
         td = oracle.deliberate(make_ctx())
 
     assert td.decision == "CONTINUE"
@@ -261,3 +266,47 @@ def test_prompt_no_error_shows_none(oracle):
     ctx = make_ctx(error=None)
     prompt = oracle._build_prompt(ctx)
     assert "error=none" in prompt
+
+
+# ── Compact output grammar ────────────────────────────────────────────────────
+
+def test_deliberate_accepts_compact_line(oracle):
+    """The model is asked for ``DECISION | reason`` — a JSON object costs many
+    more output tokens, and output tokens are the oracle's latency."""
+    mock_resp = MagicMock()
+    mock_resp.message.content = "FAILSAFE | battery 12% below critical"
+
+    with patch("ollama.chat", return_value=mock_resp):
+        td = oracle.deliberate(make_ctx(battery_pct=12.0))
+
+    assert td.decision == "FAILSAFE"
+    assert td.reason   == "battery 12% below critical"
+    assert td.source   == "oracle"
+
+
+def test_deliberate_streams_when_thinking_enabled(oracle):
+    """ORACLE_THINK=1 keeps the old streamed chain-of-thought path working."""
+    import planner as planner_mod
+
+    chunk = MagicMock()
+    chunk.message.thinking = "battery is fine, nothing pending"
+    chunk.message.content  = "CONTINUE | nominal"
+
+    with patch.object(planner_mod, "ORACLE_THINK", True), \
+         patch("ollama.chat", return_value=iter([chunk])):
+        td = oracle.deliberate(make_ctx())
+
+    assert td.decision == "CONTINUE"
+    assert "battery is fine" in td.thinking
+
+
+def test_json_parse_no_longer_swallowed_by_attribute_error(oracle):
+    """
+    Regression: _from_dict lived only on ThinkingOracle while both parse paths
+    called ThinkingDecision._from_dict.  AttributeError is not caught by those
+    call sites, so every successful parse escaped to deliberate()'s catch-all
+    and the oracle silently used the rule fallback after paying full latency.
+    """
+    parsed = ThinkingOracle._parse_json('{"decision": "REPLAN", "reason": "low battery"}')
+    assert parsed is not None
+    assert parsed.decision == "REPLAN"

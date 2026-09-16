@@ -10,8 +10,9 @@ from planner import Planner
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def ok(tool, state="connected", next_action=None, wait=None):
-    return ToolResponse.success(tool=tool, state=state, next_action=next_action, wait=wait)
+def ok(tool, state="connected", next_action=None, wait=None, data=None):
+    return ToolResponse.success(tool=tool, state=state, data=data,
+                                next_action=next_action, wait=wait)
 
 def fail(tool, state="idle", error="MOCK_ERROR", next_action=None):
     return ToolResponse.failure(tool=tool, state=state, error=error, next_action=next_action)

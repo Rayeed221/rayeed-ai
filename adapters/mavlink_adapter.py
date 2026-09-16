@@ -7,10 +7,19 @@ Connection:
 """
 
 import math
+import threading
 import time
 import logging
 
 from adapters.base_adapter import BaseAdapter
+from adapters.mavlink_cache import MAVLinkCache
+from config import (
+    MAVLINK_CACHE_MAX_AGE_SEC,
+    MAVLINK_ACK_TIMEOUT_SEC,
+    MAVLINK_MODE_CONFIRM_SEC,
+    MAVLINK_WAIT_ALTITUDE_SEC,
+    MAVLINK_WAIT_ARRIVAL_SEC,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +47,7 @@ _MAV_CMD_CONDITION_YAW         = 115
 _MAV_CMD_DO_CHANGE_SPEED       = 178
 _MAV_MODE_FLAG_CUSTOM_MODE     = 1     # MAV_MODE_FLAG_CUSTOM_MODE_ENABLED
 _MAV_RESULT_ACCEPTED           = 0
+_MAV_FRAME_GLOBAL_RELATIVE_ALT_INT = 6     # MAV_FRAME_GLOBAL_RELATIVE_ALT_INT
 # SET_POSITION_TARGET_GLOBAL_INT type_mask: ignore velocity, accel, yaw, yaw_rate; use position only
 _POS_TARGET_TYPE_MASK          = 0b110111111000  # bits 3-8, 10-11 ignored; bits 0-2 used
 
@@ -56,11 +66,20 @@ class MAVLinkAdapter(BaseAdapter):
     def __init__(self, connection_string: str = "tcp:127.0.0.1:5762"):
         self._connection_string = connection_string
         self._conn = None
+        # One reader thread owns the socket; handlers read the cache in O(1)
+        # instead of issuing blocking round trips.  See mavlink_cache.py.
+        self._cache = None
+        # pymavlink sends are not thread-safe and several tasks send
+        # concurrently (LLM tool calls, telemetry pollers, workflows).
+        self._send_lock = threading.Lock()
 
     def is_connected(self) -> bool:
         return self._conn is not None
 
     def disconnect(self):
+        if self._cache is not None:
+            self._cache.stop()
+            self._cache = None
         if self._conn:
             self._conn.close()
             self._conn = None
@@ -75,14 +94,26 @@ class MAVLinkAdapter(BaseAdapter):
     # ── Internal helpers ─────────────────────────────────────────────────────
 
     def _recv(self, msg_type: str, timeout: float = 5.0):
-        """Receive a specific MAVLink message type; returns None on timeout."""
+        """
+        Latest message of this type, waiting only if the cache has nothing
+        fresh.  A cache hit (the common case on a live 10 Hz stream) costs
+        microseconds; the blocking read this replaced cost 100 ms-5 s and
+        threw away every other consumer's messages while it waited.
+        """
+        if self._cache is None:
+            return None
+        msg = self._cache.get(msg_type, max_age=MAVLINK_CACHE_MAX_AGE_SEC)
+        if msg is not None:
+            return msg
+        return self._cache.wait(
+            msg_type, timeout=timeout, max_age=MAVLINK_CACHE_MAX_AGE_SEC
+        )
+
+    def _require_conn(self):
+        """Guard for command handlers.  Returns an error dict, or None if OK."""
         if not self.is_connected():
-            return None
-        try:
-            return self._conn.recv_match(type=msg_type, blocking=True, timeout=timeout)
-        except Exception as e:
-            logger.error(f"[MAVLINK] recv_match({msg_type}) failed: {e}")
-            return None
+            return {"error": "not connected — call connect_drone first"}
+        return None
 
     def _request_streams(self):
         """Request all required telemetry streams from autopilot."""
@@ -99,31 +130,53 @@ class MAVLinkAdapter(BaseAdapter):
         except Exception as e:
             logger.warning(f"[MAVLINK] Could not request streams (non-fatal): {e}")
 
-    def _flush_queue(self):
-        """Drain stale messages from receive queue."""
+    def _accept_msg(self, msg) -> bool:
+        """
+        Drop HEARTBEATs from anything other than the autopilot.  Other GCS
+        clients on the same link (including our own avoidance layer) emit
+        heartbeats, and caching one would corrupt mode detection.
+        """
         try:
-            time.sleep(0.3)
-            while self._conn.recv_match(blocking=False) is not None:
-                pass
-            logger.info("[MAVLINK] Queue flushed")
+            if msg.get_type() == "HEARTBEAT":
+                return msg.get_srcSystem() == self._conn.target_system
         except Exception:
-            pass
+            return True
+        return True
+
+    def _prime_cache(self, timeout: float = 2.0) -> None:
+        """
+        Wait for the reader thread to see the first heartbeat + position so the
+        first telemetry tool call is a cache hit rather than a cold wait.
+        Replaces the old fixed 0.3 s drain-and-sleep.
+        """
+        if self._cache is None:
+            return
+        self._cache.wait("HEARTBEAT", timeout=timeout)
+        self._cache.wait("GLOBAL_POSITION_INT", timeout=timeout)
+        logger.info(f"[MAVLINK] Cache primed: {self._cache.stats()}")
 
     def _send_command_long(self, command: int, p1=0.0, p2=0.0, p3=0.0,
                            p4=0.0, p5=0.0, p6=0.0, p7=0.0,
-                           ack_timeout: float = 10.0):
+                           ack_timeout: float = MAVLINK_ACK_TIMEOUT_SEC):
         """
         Send COMMAND_LONG and wait for COMMAND_ACK.
         Returns (True, "ok") on MAV_RESULT_ACCEPTED, (False, reason) otherwise.
         """
-        self._conn.mav.command_long_send(
-            self._conn.target_system,
-            self._conn.target_component,
-            command, 0,
-            float(p1), float(p2), float(p3), float(p4),
-            float(p5), float(p6), float(p7),
-        )
-        ack = self._recv("COMMAND_ACK", timeout=ack_timeout)
+        if not self.is_connected() or self._cache is None:
+            return False, "not connected — call connect_drone first"
+
+        sent_at = time.monotonic()
+        with self._send_lock:
+            self._conn.mav.command_long_send(
+                self._conn.target_system,
+                self._conn.target_component,
+                command, 0,
+                float(p1), float(p2), float(p3), float(p4),
+                float(p5), float(p6), float(p7),
+            )
+        # Match the ACK to THIS command id and to a timestamp after the send,
+        # so a stale ACK for another command can never satisfy this wait.
+        ack = self._cache.wait_ack(command, since=sent_at, timeout=ack_timeout)
         if ack is None:
             return False, "no COMMAND_ACK received"
         if ack.result != _MAV_RESULT_ACCEPTED:
@@ -153,14 +206,18 @@ class MAVLinkAdapter(BaseAdapter):
                 f"component={self._conn.target_component}"
             )
             self._request_streams()
-            self._flush_queue()
+            self._cache = MAVLinkCache(self._conn, msg_filter=self._accept_msg)
+            self._cache.start()
+            self._prime_cache()
             return {"status": "connected", "connection_string": uri}
         except Exception as exc:
             self._conn = None
             return {"error": f"connect failed: {exc}"}
 
     def _handle_get_current_state(self):
-        msg = self._recv("HEARTBEAT")
+        # HEARTBEAT is a 1 Hz stream — a sub-2 s cached copy is always current
+        # enough, and avoids blocking up to a full heartbeat period.
+        msg = self._cached_heartbeat()
         if msg is None:
             return {"error": "no HEARTBEAT received"}
         armed = bool(msg.base_mode & 0x80)  # MAV_MODE_FLAG_SAFETY_ARMED = 128
@@ -177,7 +234,7 @@ class MAVLinkAdapter(BaseAdapter):
         if pos is None:
             return {"error": _TELEMETRY_ERROR}
         
-        vfr = self._recv("VFR_HUD", timeout=2.0)
+        vfr = self._cache.get("VFR_HUD", max_age=MAVLINK_CACHE_MAX_AGE_SEC) if self._cache else None
         altitude    = pos.relative_alt / 1000.0
         heading     = pos.hdg / 100.0 if pos.hdg != 65535 else 0.0
         airspeed    = vfr.airspeed    if vfr else 0.0
@@ -236,25 +293,53 @@ class MAVLinkAdapter(BaseAdapter):
         bearing = math.degrees(math.atan2(dlon, dlat)) % 360
         return {"distance_str": f"{dist:.1f} meters", "bearing": round(bearing, 1)}
 
+    def _cached_heartbeat(self, max_age: float = 2.0):
+        """Most recent HEARTBEAT (1 Hz stream), or None."""
+        if self._cache is None:
+            return None
+        msg = self._cache.get("HEARTBEAT", max_age=max_age)
+        if msg is not None:
+            return msg
+        return self._cache.wait("HEARTBEAT", timeout=2.0, max_age=max_age)
+
     def _handle_set_mode(self, mode: str):
+        err = self._require_conn()
+        if err:
+            return err
         mode_id = _ARDUPILOT_MODES.get(mode.upper())
         if mode_id is None:
             return {"error": f"unknown mode '{mode}'; valid: {sorted(_ARDUPILOT_MODES)}"}
-        self._conn.mav.command_long_send(
-            self._conn.target_system,
-            self._conn.target_component,
-            _MAV_CMD_DO_SET_MODE, 0,
-            float(_MAV_MODE_FLAG_CUSTOM_MODE),
-            float(mode_id),
-            0.0, 0.0, 0.0, 0.0, 0.0,
-        )
-        # Confirm by watching HEARTBEAT custom_mode field
-        deadline = time.monotonic() + 5.0
-        while time.monotonic() < deadline:
-            hb = self._recv("HEARTBEAT", timeout=1.0)
-            if hb and hb.custom_mode == mode_id:
-                return {"status": "ok", "mode": mode.upper()}
-        return {"error": f"mode change to '{mode}' not confirmed within 5 s"}
+
+        # Fast path — already in the requested mode.  goto_position / takeoff /
+        # land all route through here, and after takeoff the vehicle is already
+        # in GUIDED, so this turns a ~1 s heartbeat wait into a cache read.
+        hb = self._cached_heartbeat()
+        if hb is not None and hb.custom_mode == mode_id:
+            return {"status": "ok", "mode": mode.upper()}
+
+        sent_at = time.monotonic()
+        with self._send_lock:
+            self._conn.mav.command_long_send(
+                self._conn.target_system,
+                self._conn.target_component,
+                _MAV_CMD_DO_SET_MODE, 0,
+                float(_MAV_MODE_FLAG_CUSTOM_MODE),
+                float(mode_id),
+                0.0, 0.0, 0.0, 0.0, 0.0,
+            )
+        # Confirm against the cached HEARTBEAT stream.  Polling the cache
+        # cannot swallow messages other handlers are waiting for.
+        hb = self._cache.wait(
+            "HEARTBEAT",
+            timeout=MAVLINK_MODE_CONFIRM_SEC,
+            match=lambda m: m.custom_mode == mode_id,
+        ) if self._cache else None
+        if hb is not None:
+            return {"status": "ok", "mode": mode.upper()}
+        return {
+            "error": f"mode change to '{mode}' not confirmed within "
+                     f"{MAVLINK_MODE_CONFIRM_SEC} s"
+        }
 
     def _handle_arm_drone(self):
         ok, reason = self._send_command_long(_MAV_CMD_COMPONENT_ARM_DISARM, p1=1)
@@ -296,23 +381,26 @@ class MAVLinkAdapter(BaseAdapter):
         return {"status": "returning_to_launch"}
 
     def _handle_goto_position(self, lat: float, lon: float, alt: float):
-        from pymavlink import mavutil
+        err = self._require_conn()
+        if err:
+            return err
         mode_res = self._handle_set_mode("GUIDED")
         if "error" in mode_res:
             return mode_res
-        self._conn.mav.set_position_target_global_int_send(
-            0,                                          # time_boot_ms (ignored by vehicle)
-            self._conn.target_system,
-            self._conn.target_component,
-            mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
-            _POS_TARGET_TYPE_MASK,
-            int(lat * 1e7),                             # lat_int
-            int(lon * 1e7),                             # lon_int
-            alt,                                        # alt (metres, relative)
-            0.0, 0.0, 0.0,                              # vx, vy, vz  (ignored)
-            0.0, 0.0, 0.0,                              # ax, ay, az  (ignored)
-            0.0, 0.0,                                   # yaw, yaw_rate (ignored)
-        )
+        with self._send_lock:
+            self._conn.mav.set_position_target_global_int_send(
+                0,                                      # time_boot_ms (ignored)
+                self._conn.target_system,
+                self._conn.target_component,
+                _MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
+                _POS_TARGET_TYPE_MASK,
+                int(lat * 1e7),                         # lat_int
+                int(lon * 1e7),                         # lon_int
+                alt,                                    # alt (metres, relative)
+                0.0, 0.0, 0.0,                          # vx, vy, vz  (ignored)
+                0.0, 0.0, 0.0,                          # ax, ay, az  (ignored)
+                0.0, 0.0,                               # yaw, yaw_rate (ignored)
+            )
         return {"status": "moving", "target": {"lat": lat, "lon": lon, "alt": alt}}
 
     def _handle_set_yaw(self, yaw_deg: float, relative: bool = False):
@@ -338,30 +426,52 @@ class MAVLinkAdapter(BaseAdapter):
             return {"error": f"set_speed failed: {reason}"}
         return {"status": "ok", "speed_ms": speed_ms}
 
-    def _handle_wait_altitude(self, target_alt: float, tolerance: float = 0.5):
-        deadline = time.monotonic() + 60.0
+    def _handle_wait_altitude(self, target_alt: float, tolerance: float = 0.5,
+                              timeout: float = MAVLINK_WAIT_ALTITUDE_SEC):
+        """
+        Poll the cached position stream at 20 Hz.  The old loop did a 2 s
+        blocking recv plus a 0.2 s sleep per iteration, so it detected arrival
+        up to ~2.2 s late and consumed messages other handlers needed.
+        """
+        if self._cache is None:
+            return {"error": "not connected — call connect_drone first"}
+        deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            pos = self._recv("GLOBAL_POSITION_INT", timeout=2.0)
+            pos = self._cache.get("GLOBAL_POSITION_INT", max_age=MAVLINK_CACHE_MAX_AGE_SEC)
             if pos is not None:
                 current = pos.relative_alt / 1000.0
                 if abs(current - target_alt) <= tolerance:
                     return {"status": "altitude_reached", "altitude": round(current, 2)}
-            time.sleep(0.2)
+            time.sleep(0.05)
         return {"error": f"timed out waiting for altitude {target_alt} m"}
 
-    def _handle_wait_arrival(self, tolerance_m: float = 1.0):
-        """Wait until groundspeed is near zero for 3 consecutive reads."""
-        deadline = time.monotonic() + 120.0
-        stable   = 0
+    def _handle_wait_arrival(self, tolerance_m: float = 1.0,
+                             timeout: float = MAVLINK_WAIT_ARRIVAL_SEC):
+        """
+        Arrived = groundspeed below 0.5 m/s for 3 consecutive fresh samples.
+        Reads the cached VFR_HUD stream, so "consecutive" now means three
+        distinct messages rather than three blocking round trips.
+        """
+        if self._cache is None:
+            return {"error": "not connected — call connect_drone first"}
+        deadline  = time.monotonic() + timeout
+        stable    = 0
+        last_seen = None
         while time.monotonic() < deadline:
-            vfr = self._recv("VFR_HUD", timeout=2.0)
-            if vfr is not None and vfr.groundspeed < 0.5:
-                stable += 1
-                if stable >= 3:
-                    return {"status": "arrived"}
-            else:
+            vfr, stamp = self._cache.get_with_ts(
+                "VFR_HUD", max_age=MAVLINK_CACHE_MAX_AGE_SEC
+            )
+            if vfr is None:
                 stable = 0
-            time.sleep(0.2)
+            elif stamp != last_seen:            # count new samples only
+                last_seen = stamp
+                if vfr.groundspeed < 0.5:
+                    stable += 1
+                    if stable >= 3:
+                        return {"status": "arrived"}
+                else:
+                    stable = 0
+            time.sleep(0.05)
         return {"error": "timed out waiting for arrival"}
 
     def _handle_wait_time(self, seconds: float):

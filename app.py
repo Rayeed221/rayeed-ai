@@ -35,6 +35,7 @@ from config import (
     VISION_CAMERA_PITCH_DEG, VISION_CAMERA_YAW_DEG, VISION_CAMERA_HFOV_DEG,
     YOLO_BLOB_DIR, YOLO_AUTO_DOWNLOAD,
     AUDIO_DEVICE_ID,
+    COMPACT_TOOL_RESPONSE,
     DRONET_MODEL_PATH,
     VIOSLAM_ENABLED, VIOSLAM_DB_PATH, VIOSLAM_LOAD_DB,
     VIOSLAM_FPS, VIOSLAM_SLAM_HZ, VIOSLAM_OCC_CELL_SIZE,
@@ -363,6 +364,7 @@ class DroneAI:
                             self.mission_mem.save_state({
                                 "mission_state": self.sm.state.value,
                                 "last_tool":     fc.name,
+                                "last_result":   tool_resp.sentence(),
                             })
 
                             # ── Send tool result back to LLM (guarded) ───────
@@ -373,7 +375,11 @@ class DroneAI:
                                         types.FunctionResponse(
                                             id=fc.id,
                                             name=fc.name,
-                                            response=tool_resp.to_dict(),
+                                            response=(
+                                                tool_resp.to_llm()
+                                                if COMPACT_TOOL_RESPONSE
+                                                else tool_resp.to_dict()
+                                            ),
                                         )
                                     ]
                                 )
@@ -436,7 +442,12 @@ class DroneAI:
                 logger.error(f"[SYSTEM] Error during initial MAVLink connection: {e}")
 
         # 2. Background tasks started before session opens ──────────────────
+        #    oracle_prewarm loads the local decision model up front so the
+        #    first in-flight decision does not pay a cold load inside the
+        #    voice round trip.  It is short-lived and swallows its own errors.
         background_tasks = [
+            loop.create_task(asyncio.to_thread(self.planner.prewarm),
+                                                         name="oracle_prewarm"),
             loop.create_task(self.tel_reader.run(),      name="telemetry_reader"),
             loop.create_task(self.bat_monitor.run(),     name="battery_monitor"),
             loop.create_task(self.pos_monitor.run(),     name="position_monitor"),
@@ -477,6 +488,7 @@ class DroneAI:
             await asyncio.gather(*background_tasks, return_exceptions=True)
             if self.oak_pipeline is not None:
                 self.oak_pipeline.stop()
+            logger.info(f"[PLANNER] Decision tiers: {self.planner.decision_stats()}")
             logger.info("[SESSION] Terminated.")
 
 

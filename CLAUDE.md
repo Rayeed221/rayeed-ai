@@ -61,9 +61,9 @@ In ArduPilot GUIDED mode, velocity commands are ephemeral — they override the 
 
 2. **LLM Orchestration** (`app.py` + `tools/declarations.py`) — Manages the Gemini Live session, system prompt (Bangla), function declarations, and the resilient receive loop. Session tasks (mic, send, receive, playback) are isolated from background tasks (telemetry, battery, position, avoidance) so a crash in one doesn't kill the other.
 
-3. **Mission Planning** (`planner.py` + `workflows/`) — Decision engine with 6 outcomes: `CONTINUE`, `WAIT`, `RETRY`, `REPLAN`, `ABORT`, `FAILSAFE`. The planner has **authority to override LLM decisions** for safety. Phase 1b inserts an avoidance gate: returns `WAIT` while DroNet is actively steering around an obstacle, escalates to `REPLAN` if stuck > 10 s continuously.
+3. **Mission Planning** (`planner.py` + `workflows/`) — Decision engine with 6 outcomes: `CONTINUE`, `WAIT`, `RETRY`, `REPLAN`, `ABORT`, `FAILSAFE`. The planner has **authority to override LLM decisions** for safety. Runs three tiers: `reflex()` (deterministic table, ~1 µs, resolves every hard safety gate and every nominal outcome, including the DroNet avoidance gate — `WAIT` while steering, `REPLAN` if stuck > 10 s), then the oracle only on `ReflexVerdict.UNKNOWN`, then the rule fallback. See `LATENCY.md`.
 
-4. **Safe Execution** (`tool_dispatcher.py` + `safety_policy.py` + `state_machine.py`) — 7-step pipeline: registry check → safety pre-check → execute (10s timeout) → state transition → update monitors → reset retry counter → return `ToolResponse`. Safety gates block operations on low battery, stale telemetry, altitude/speed violations, exceeded retry counts, **or active DroNet avoidance** (`goto_position` / `set_speed` are gated when `collision_prob ≥ AVOIDANCE_COLLISION_THR`).
+4. **Safe Execution** (`tool_dispatcher.py` + `safety_policy.py` + `state_machine.py`) — 7-step pipeline: registry check → safety pre-check → execute (per-tool timeout via `timeout_for()`; 10s default, longer for `wait_*`) → state transition → update monitors → reset retry counter → return `ToolResponse`. Safety gates block operations on low battery, stale telemetry, altitude/speed violations, exceeded retry counts, **or active DroNet avoidance** (`goto_position` / `set_speed` are gated when `collision_prob ≥ AVOIDANCE_COLLISION_THR`).
 
 5. **Drone Backend** (`adapters/`) — Swappable via `DRONE_BACKEND` env var. `SimAdapter` (default) simulates all operations in memory. `MAVLinkAdapter` connects to real hardware.
 
@@ -80,7 +80,9 @@ In ArduPilot GUIDED mode, velocity commands are ephemeral — they override the 
 | `planner.py` | Decision engine; Phase 1b avoidance gate; overrides LLM `next_action`; non-blocking waits |
 | `tool_registry.py` | Metadata for 25+ tools: description, arg schema, permission level, allowed states |
 | `schemas.py` | `ToolResponse` envelope (ok, tool, state, data, error, next_action, wait, confidence, timestamp) |
-| `config.py` | All thresholds and env vars (API keys, audio rates, backend, safety limits, avoidance thresholds) |
+| `config.py` | All thresholds and env vars (API keys, audio rates, backend, safety limits, avoidance thresholds, latency knobs) |
+| `adapters/mavlink_cache.py` | `MAVLinkCache` — single-reader message blackboard; all MAVLink reads go through it |
+| `LATENCY.md` | Where latency goes in the voice path, what was changed, what is left |
 | `vision/avoidance/dronet_runner.py` | `DroNetRunner` + `AvoidanceState`; autonomous 20 Hz avoidance loop |
 | `vision/avoidance/run_dronet_oak.py` | Standalone DroNet CLI (unchanged by integration) |
 
@@ -217,11 +219,20 @@ The intended integration path: replace `PoseCache` GPS-based pose with VIO odome
 
 ## MAVLink Adapter Implementation
 
-The stub lives at `adapters/mavlink_adapter.py`. All 18 `_handle_*()` methods exist but return `{"error": "MAVLink not yet wired..."}`. The `SimAdapter` at `adapters/sim_adapter.py` is the reference implementation — match its structure exactly.
+`adapters/mavlink_adapter.py` implements all 18 `_handle_*()` methods against pymavlink. The `SimAdapter` at `adapters/sim_adapter.py` is the reference for response shapes — match its structure exactly.
 
 ### Execution Model
 
-All handler methods must remain **synchronous**. The dispatcher wraps every `adapter.execute()` call with `asyncio.to_thread()`, so blocking pymavlink calls (e.g., `wait_heartbeat()`, `recv_match()`) are safe inside handlers.
+All handler methods must remain **synchronous**. The dispatcher wraps every `adapter.execute()` call with `asyncio.to_thread()`, so blocking calls are safe inside handlers.
+
+**Never call `self._conn.recv_match()` from a handler.** Reads go through the message cache (`adapters/mavlink_cache.py`): one reader thread owns the socket and stores the latest message per type, and handlers read it in O(1). A blocking `recv_match(type=X)` discards every other message while it waits, so concurrent handlers steal each other's telemetry — and pymavlink connections are not thread-safe. Use:
+
+- `self._recv(msg_type, timeout)` — cached read, waits only if nothing is fresh
+- `self._cache.get(msg_type, max_age=...)` — pure cache read, never waits
+- `self._cache.wait(msg_type, timeout, match=...)` — poll the cache for a condition
+- `self._cache.wait_ack(command, since, timeout)` — correlate a `COMMAND_ACK`
+
+Sends must hold `self._send_lock`. Command handlers return `{"error": ...}` when not connected rather than raising — an unhandled exception costs a dispatcher retry and an extra LLM round trip.
 
 ### Connection Pattern
 
@@ -229,6 +240,10 @@ All handler methods must remain **synchronous**. The dispatcher wraps every `ada
 from pymavlink import mavutil
 self._conn = mavutil.mavlink_connection(self._connection_string)
 self._conn.wait_heartbeat()
+self._request_streams()
+self._cache = MAVLinkCache(self._conn, msg_filter=self._accept_msg)
+self._cache.start()
+self._prime_cache()
 ```
 
 ### Required Handler Return Shapes
@@ -292,6 +307,16 @@ Safety thresholds (all configurable):
 - Max speed: 15 m/s
 - Telemetry stale: 5s → wait; 10s → emergency failsafe
 - Max retries: 3
+
+Latency (see `LATENCY.md` for why each exists):
+
+- `MAVLINK_CACHE_MAX_AGE_SEC` (0.5) — staleness bound on cached MAVLink reads
+- `MAVLINK_ACK_TIMEOUT_SEC` (3.0) / `MAVLINK_MODE_CONFIRM_SEC` (3.0)
+- `MAVLINK_WAIT_ALTITUDE_SEC` (60) / `MAVLINK_WAIT_ARRIVAL_SEC` (120) — the dispatcher budget follows these
+- `ORACLE_ENABLED` (1) / `ORACLE_DEADLINE_SEC` (1.5) — hard budget, enforced by the planner
+- `ORACLE_THINK` (0) / `ORACLE_NUM_PREDICT` (32) / `ORACLE_KEEP_ALIVE` (30m) / `ORACLE_PREWARM` (1)
+- `COMPACT_TOOL_RESPONSE` (1) — send `ToolResponse.to_llm()` instead of the full dict
+- `AUDIO_OUTPUT_LATENCY` (low) — set to `high` if playback underruns
 
 Vision:
 
