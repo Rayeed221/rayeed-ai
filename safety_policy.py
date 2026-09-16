@@ -210,6 +210,10 @@ class SafetyPolicy:
             )
         return None
 
+    def retry_count(self, tool: str) -> int:
+        """Current consecutive-failure count for a tool."""
+        return self._retry_counts.get(tool, 0)
+
     def oracle_context_data(self, tool_name: str) -> dict:
         """Return current safety state for oracle context building."""
         tel_age = (
@@ -220,7 +224,7 @@ class SafetyPolicy:
             "battery_pct":       self._last_battery,
             "altitude_m":        self._last_altitude,
             "telemetry_age_sec": tel_age,
-            "retry_count":       self._retry_counts.get(tool_name, 0),
+            "retry_count":       self.retry_count(tool_name),
         }
 
     # ── Retry management ──────────────────────────────────────────────────────

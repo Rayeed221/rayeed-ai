@@ -20,8 +20,10 @@ Three-tier decision loop (reflex / navigation / mission):
   Tier 2 — DELIBERATE  ThinkingOracle (qwen3:0.6b via Ollama), consulted only
                        when the reflex tier returns UNKNOWN, under a hard
                        ORACLE_DEADLINE_SEC budget.
-  Tier 3 — FALLBACK    _rule_fallback(), mirroring safety_policy.py thresholds,
-                       used whenever the oracle is disabled, slow, or unparseable.
+  Tier 3 — FALLBACK    the reflex tier's own `fallback` decision, used when
+                       the oracle is disabled, slow, or unparseable.  It is
+                       carried by the Reflex already computed in tier 1, so
+                       there is no second rule table to keep in sync.
 
 Why the tiering matters for latency: planner.decide() runs between the
 dispatcher and the tool result the Live model is waiting on, so every
@@ -136,6 +138,25 @@ class ThinkingOracle:
         self._calls    = 0
         self._failures = 0
         self._prewarmed = False
+        # Set while a generation is in flight, cleared by the worker thread
+        # itself — the planner's deadline abandons the *wait*, so only the
+        # thread knows when Ollama is actually free again.
+        self.busy      = False
+
+    def _chat(self, **kwargs):
+        """
+        ollama.chat with a real client-side timeout.
+
+        Without one, a deadline expiry in the planner only stops the waiting:
+        the request keeps generating against Ollama with nobody to receive it,
+        burning CPU the audio threads need.
+        """
+        import ollama
+        try:
+            return ollama.Client(timeout=self._timeout).chat(**kwargs)
+        except TypeError:
+            # Older ollama clients take no timeout — fall back to the module API.
+            return ollama.chat(**kwargs)
 
     def prewarm(self) -> None:
         """
@@ -144,13 +165,12 @@ class ThinkingOracle:
         A cold qwen3:0.6b load costs seconds on a Pi-class board, and without
         this the first in-flight decision of every session pays it.
         """
-        if self._prewarmed or not ORACLE_PREWARM:
+        if self._prewarmed or not (ORACLE_PREWARM and ORACLE_ENABLED):
             return
         self._prewarmed = True
         try:
-            import ollama
             t0 = time.monotonic()
-            ollama.chat(
+            self._chat(
                 model=self._model,
                 messages=[{"role": "user", "content": "ping"}],
                 think=False,
@@ -173,9 +193,8 @@ class ThinkingOracle:
         context keys: tool, ok, error, state, battery_pct, altitude_m,
                       telemetry_age_sec, retry_count, airborne
         """
-        import ollama
-
         self._calls += 1
+        self.busy = True
         t0 = time.monotonic()
         prompt = self._build_prompt(context)
 
@@ -195,7 +214,7 @@ class ThinkingOracle:
             }
 
             if ORACLE_THINK:
-                stream = ollama.chat(
+                stream = self._chat(
                     model=self._model,
                     messages=[{"role": "user", "content": prompt}],
                     think=True,
@@ -210,7 +229,7 @@ class ThinkingOracle:
                     if msg.content:
                         content_buf += msg.content
             else:
-                resp = ollama.chat(
+                resp = self._chat(
                     model=self._model,
                     messages=[{"role": "user", "content": prompt}],
                     think=False,
@@ -226,12 +245,12 @@ class ThinkingOracle:
                 f"{thinking_buf[:400]}{'...' if len(thinking_buf) > 400 else ''}"
             )
 
-            decision = (
-                self._parse_json(content_buf)
-                or self._parse_compact(content_buf)
-                or self._extract_from_thinking(thinking_buf)
-                or self._parse_compact(thinking_buf)
-            )
+            decision = self._parse_json(content_buf) or self._parse_compact(content_buf)
+            if decision is None and thinking_buf:
+                # Only reachable with ORACLE_THINK=1 — the non-streaming path
+                # never fills thinking_buf.
+                decision = (self._extract_from_thinking(thinking_buf)
+                            or self._parse_compact(thinking_buf))
 
             if decision:
                 decision.thinking   = thinking_buf
@@ -252,17 +271,10 @@ class ThinkingOracle:
         except Exception as exc:
             self._failures += 1
             logger.warning(f"[ORACLE] Error: {exc} — rule fallback")
+        finally:
+            self.busy = False
 
         return self._rule_fallback(context)
-
-    def should_invoke(self, tool_name: str, ok: bool, airborne: bool) -> bool:
-        """
-        Deprecated — kept for callers outside the planner.
-
-        Being airborne is not by itself ambiguous; the reflex tier
-        (``Planner.reflex``) now decides what is worth deliberating on.
-        """
-        return tool_name in HIGH_VALUE_TOOLS and not ok
 
     def stats(self) -> dict:
         return {
@@ -339,11 +351,6 @@ class ThinkingOracle:
                 continue
         return None
 
-    @staticmethod
-    def _from_dict(d: dict) -> Optional["ThinkingDecision"]:
-        """Alias — the implementation lives on ThinkingDecision."""
-        return ThinkingDecision._from_dict(d)
-
     # ── Deterministic rule fallback ───────────────────────────────────────────
 
     @staticmethod
@@ -356,16 +363,16 @@ class ThinkingOracle:
         error    = ctx.get("error") or ""
         airborne = ctx.get("airborne", False)
 
-        if tel_age > 10.0 or "TELEMETRY_EMERGENCY" in error:
+        if tel_age > EMERGENCY_STALE_SEC or "TELEMETRY_EMERGENCY" in error:
             decision, reason = "FAILSAFE", f"telemetry age {tel_age:.1f}s exceeds emergency threshold"
-        elif battery <= 15.0 or "BATTERY_CRITICAL" in error:
+        elif battery <= BATTERY_CRITICAL_PCT or "BATTERY_CRITICAL" in error:
             decision, reason = "FAILSAFE", f"battery critical at {battery:.1f}%"
-        elif retries >= 3 or "MAX_RETRIES" in error:
+        elif retries >= MAX_RETRY_COUNT or "MAX_RETRIES" in error:
             decision, reason = "ABORT", f"retry limit reached ({retries})"
-        elif battery <= 25.0 and airborne:
+        elif battery <= BATTERY_LOW_PCT and airborne:
             decision, reason = "REPLAN", f"battery low at {battery:.1f}% — replan toward RTH"
-        elif not ok and retries < 3:
-            decision, reason = "RETRY", f"transient failure (retry {retries}/3)"
+        elif not ok and retries < MAX_RETRY_COUNT:
+            decision, reason = "RETRY", f"transient failure (retry {retries}/{MAX_RETRY_COUNT})"
         else:
             decision, reason = "CONTINUE", "nominal"
 
@@ -416,21 +423,30 @@ class PlanDecision(str, Enum):
 
 # ── Reflex tier ────────────────────────────────────────────────────────────────
 
-class ReflexVerdict(str, Enum):
-    """CHECK grammar — the outcome of the deterministic reflex pass."""
-    CLEAR   = "clear"      # nominal; decision is definite
-    BLOCKED = "blocked"    # a hard gate fired; decision is definite
-    UNKNOWN = "unknown"    # ambiguous; escalate to the oracle
-
-
 @dataclass
 class Reflex:
-    verdict:  ReflexVerdict
+    """
+    Outcome of the deterministic reflex pass — the CHECK step of the grammar.
+
+    `decision` is the answer when the reflex tier can give one (CLEAR or
+    BLOCKED); None means UNKNOWN, i.e. worth deliberating on.  `fallback` is
+    what to do anyway if deliberation is unavailable or too slow, so the
+    escalation path never needs a second rule table to re-derive it.
+    """
     decision: Optional[PlanDecision]
     reason:   str
+    fallback: PlanDecision = PlanDecision.ABORT
 
     def is_definite(self) -> bool:
-        return self.verdict is not ReflexVerdict.UNKNOWN and self.decision is not None
+        return self.decision is not None
+
+    @staticmethod
+    def definite(decision: PlanDecision, reason: str) -> "Reflex":
+        return Reflex(decision=decision, reason=reason, fallback=decision)
+
+    @staticmethod
+    def unknown(reason: str, fallback: PlanDecision) -> "Reflex":
+        return Reflex(decision=None, reason=reason, fallback=fallback)
 
 
 # ── Planner ────────────────────────────────────────────────────────────────────
@@ -449,45 +465,61 @@ class Planner:
         self._reflex_hits     = 0
         self._escalations     = 0
         self._oracle_timeouts = 0
-        self._oracle_busy     = False
 
     # ── Core decision engine ──────────────────────────────────────────────────
 
     async def decide(self, response: ToolResponse) -> PlanDecision:
         """
-        Three-tier decision pipeline (see module docstring):
-          Tier 1 — reflex(): deterministic, microseconds, answers the common case
-          Tier 2 — oracle deliberation, only on ReflexVerdict.UNKNOWN, deadlined
-          Tier 3 — rule fallback, if the oracle is off / slow / unparseable
+        The tiered decision, as a PlanDecision.
 
-        This coroutine sits inside the voice round trip, so the fast path
-        deliberately does no I/O and no model call.
+        Sits inside the voice round trip, so the fast path deliberately does no
+        I/O and no model call — see _resolve().
+        """
+        td = await self._resolve(response)
+        plan_decision = _oracle_to_plan(td) or PlanDecision.ABORT
+        if td.wait_sec and plan_decision == PlanDecision.WAIT:
+            response.wait = WaitInstruction(
+                seconds=td.wait_sec,
+                reason=f"oracle: {td.reason}",
+            )
+        return plan_decision
+
+    async def _resolve(self, response: ToolResponse) -> ThinkingDecision:
+        """
+        Three-tier decision pipeline (see module docstring), and the single
+        implementation behind both decide() and deliberate_step():
+          Tier 1 — reflex(): deterministic, microseconds, answers the common case
+          Tier 2 — oracle deliberation, only when reflex is UNKNOWN, deadlined
+          Tier 3 — the reflex tier's own fallback, if the oracle cannot answer
         """
         reflex = self.reflex(response)
 
         if reflex.is_definite():
             self._reflex_hits += 1
             logger.debug(
-                f"[PLANNER:REFLEX] {response.tool} → {reflex.decision.value} "
-                f"| {reflex.verdict.value} | {reflex.reason}"
+                f"[PLANNER:REFLEX] {response.tool} → "
+                f"{reflex.decision.value} | {reflex.reason}"
             )
-            return reflex.decision
+            return ThinkingDecision(
+                decision = reflex.decision.value.upper(),
+                reason   = reflex.reason,
+                thinking = "[reflex — no model in the loop]",
+                source   = "reflex",
+            )
 
         # ── Tier 2: deliberation on genuinely ambiguous outcomes ──────────────
         self._escalations += 1
         td = await self._deliberate(response)
-        if td is not None:
-            plan_decision = _oracle_to_plan(td)
-            if plan_decision:
-                if td.wait_sec and plan_decision == PlanDecision.WAIT:
-                    response.wait = WaitInstruction(
-                        seconds=td.wait_sec,
-                        reason=f"oracle: {td.reason}",
-                    )
-                return plan_decision
+        if td is not None and _oracle_to_plan(td) is not None:
+            return td
 
-        # ── Tier 3: deterministic fallback ────────────────────────────────────
-        return self._rule_decision(response)
+        # ── Tier 3: what the reflex tier would have said anyway ───────────────
+        return ThinkingDecision(
+            decision = reflex.fallback.value.upper(),
+            reason   = f"{reflex.reason} — oracle unavailable",
+            thinking = "[reflex fallback]",
+            source   = "fallback",
+        )
 
     # ── Tier 1: reflex ────────────────────────────────────────────────────────
 
@@ -499,17 +531,17 @@ class Planner:
         """
         # Hard safety gates — always BLOCKED, never deliberated
         if self._sm.state == MissionState.FAILSAFE:
-            return Reflex(ReflexVerdict.BLOCKED, PlanDecision.FAILSAFE, "state is failsafe")
+            return Reflex.definite(PlanDecision.FAILSAFE, "state is failsafe")
 
         if not response.ok and response.error:
             if any(k in response.error for k in ("BATTERY_CRITICAL", "TELEMETRY_EMERGENCY")):
-                return Reflex(ReflexVerdict.BLOCKED, PlanDecision.FAILSAFE, response.error[:80])
+                return Reflex.definite(PlanDecision.FAILSAFE, response.error[:80])
 
         if response.next_action == "emergency":
-            return Reflex(ReflexVerdict.BLOCKED, PlanDecision.FAILSAFE, "emergency next_action")
+            return Reflex.definite(PlanDecision.FAILSAFE, "emergency next_action")
 
         if not response.ok and self._is_unrecoverable(response):
-            return Reflex(ReflexVerdict.BLOCKED, PlanDecision.ABORT, "unrecoverable error")
+            return Reflex.definite(PlanDecision.ABORT, "unrecoverable error")
 
         # Avoidance gate (DroNet 20 Hz loop)
         avoidance_reflex = self._avoidance_reflex()
@@ -523,35 +555,39 @@ class Planner:
         # *repeated* failure of a flight-critical tool is ambiguous enough that
         # deliberation can change the answer.
         if not response.ok and response.next_action == "retry":
-            retries = self._safety.oracle_context_data(response.tool).get("retry_count", 0)
+            retries = self._safety.retry_count(response.tool)
             if response.tool in HIGH_VALUE_TOOLS and retries > 0:
-                return Reflex(ReflexVerdict.UNKNOWN, None,
-                              f"{response.tool} failed {retries}× — deliberate")
-            return Reflex(ReflexVerdict.CLEAR, PlanDecision.RETRY,
-                          f"transient failure (retry {retries}/{MAX_RETRY_COUNT})")
+                return Reflex.unknown(
+                    f"{response.tool} failed {retries}× — deliberate",
+                    fallback=PlanDecision.RETRY,
+                )
+            return Reflex.definite(
+                PlanDecision.RETRY,
+                f"transient failure (retry {retries}/{MAX_RETRY_COUNT})",
+            )
 
         if response.wait:
-            return Reflex(ReflexVerdict.CLEAR, PlanDecision.WAIT, response.wait.reason)
+            return Reflex.definite(PlanDecision.WAIT, response.wait.reason)
 
         # Live safety monitors — same thresholds as safety_policy.py
         stale = self._safety.check_telemetry_freshness()
         if stale:
             if not stale.retryable:
-                return Reflex(ReflexVerdict.BLOCKED, PlanDecision.FAILSAFE, stale.code)
-            return Reflex(ReflexVerdict.BLOCKED, PlanDecision.WAIT, stale.code)
+                return Reflex.definite(PlanDecision.FAILSAFE, stale.code)
+            return Reflex.definite(PlanDecision.WAIT, stale.code)
 
         bat = self._safety.check_battery()
         if bat:
             if not bat.retryable:
-                return Reflex(ReflexVerdict.BLOCKED, PlanDecision.FAILSAFE, bat.code)
-            return Reflex(ReflexVerdict.BLOCKED, PlanDecision.REPLAN, bat.code)
+                return Reflex.definite(PlanDecision.FAILSAFE, bat.code)
+            return Reflex.definite(PlanDecision.REPLAN, bat.code)
 
         # Nominal success — definite, and by far the most common path.  This
         # used to cost a full local LLM generation on every airborne call.
         if response.ok:
-            return Reflex(ReflexVerdict.CLEAR, PlanDecision.CONTINUE, "nominal")
+            return Reflex.definite(PlanDecision.CONTINUE, "nominal")
 
-        return Reflex(ReflexVerdict.UNKNOWN, None, "unclassified failure")
+        return Reflex.unknown("unclassified failure", fallback=PlanDecision.ABORT)
 
     def _avoidance_reflex(self) -> Optional[Reflex]:
         """WAIT while DroNet is steering; REPLAN if it has been stuck > 10 s."""
@@ -569,9 +605,9 @@ class Planner:
             if now - self._avoidance_active_since > 10.0:
                 self._avoidance_active_since = None
                 logger.warning("[PLANNER] Avoidance stuck >10s — replanning")
-                return Reflex(ReflexVerdict.BLOCKED, PlanDecision.REPLAN, "avoidance stuck")
-            return Reflex(ReflexVerdict.BLOCKED, PlanDecision.WAIT,
-                          f"avoidance active (p={prob:.2f})")
+                return Reflex.definite(PlanDecision.REPLAN, "avoidance stuck")
+            return Reflex.definite(PlanDecision.WAIT,
+                                   f"avoidance active (p={prob:.2f})")
 
         self._avoidance_active_since = None
         return None
@@ -585,18 +621,19 @@ class Planner:
         Two guards the previous version lacked:
           * a real deadline — ORACLE_TIMEOUT was stored and never enforced, so a
             stalled Ollama blocked the voice round trip indefinitely;
-          * a single-flight lock — overlapping calls queue behind one another on
-            a one-core-per-model backend, so a second caller falls straight
-            through to the rules instead of waiting twice as long.
+          * single-flight — overlapping calls queue behind one another on a
+            one-model-at-a-time backend, so a second caller falls straight
+            through to the rules instead of waiting twice as long.  The flag
+            lives on the oracle and is cleared by the worker thread, because
+            the deadline below abandons the wait, not the generation.
         """
         if not ORACLE_ENABLED:
             return None
-        if self._oracle_busy:
+        if self._oracle.busy:
             logger.info("[PLANNER] Oracle busy — using rule tier")
             return None
 
         ctx = build_oracle_context(response.tool, response, self._sm, self._safety)
-        self._oracle_busy = True
         t0 = time.monotonic()
         try:
             td: ThinkingDecision = await asyncio.wait_for(
@@ -613,8 +650,6 @@ class Planner:
         except Exception as exc:
             logger.warning(f"[PLANNER] Oracle error: {exc} — using rule tier")
             return None
-        finally:
-            self._oracle_busy = False
 
         logger.info(
             f"[PLANNER:ORACLE] {response.tool} → {td.decision} "
@@ -626,51 +661,13 @@ class Planner:
 
     async def deliberate_step(self, response: ToolResponse) -> ThinkingDecision:
         """
-        Reflex-first step decision for workflows.
+        The same tiered decision, as a ThinkingDecision, for workflows that
+        switch on the decision strings.
 
-        Returns a ThinkingDecision so workflow code that switches on the
-        decision strings needs no change.  Workflows used to call the oracle
-        unconditionally once per step — a four-step takeoff meant four serial
-        local LLM generations.  Now the reflex tier answers nominal steps and
-        the oracle is reserved for ambiguous ones, exactly as in decide().
+        Workflows used to call the oracle unconditionally once per step — a
+        four-step takeoff meant four serial local LLM generations.
         """
-        reflex = self.reflex(response)
-        if reflex.is_definite():
-            self._reflex_hits += 1
-            return ThinkingDecision(
-                decision   = reflex.decision.value.upper(),
-                reason     = reflex.reason,
-                thinking   = "[reflex — no model in the loop]",
-                confidence = 1.0,
-                source     = "reflex",
-            )
-
-        self._escalations += 1
-        td = await self._deliberate(response)
-        if td is not None:
-            return td
-
-        decision = self._rule_decision(response)
-        return ThinkingDecision(
-            decision   = decision.value.upper(),
-            reason     = "rule tier (oracle unavailable)",
-            thinking   = "[rule-fallback]",
-            confidence = 1.0,
-            source     = "fallback",
-        )
-
-    # ── Tier 3: rule fallback ─────────────────────────────────────────────────
-
-    @staticmethod
-    def _rule_decision(response: ToolResponse) -> PlanDecision:
-        """Last resort once reflex was UNKNOWN and the oracle did not answer."""
-        if not response.ok and response.next_action == "retry":
-            return PlanDecision.RETRY
-        if response.wait:
-            return PlanDecision.WAIT
-        if response.ok:
-            return PlanDecision.CONTINUE
-        return PlanDecision.ABORT
+        return await self._resolve(response)
 
     # ── Oracle helpers ────────────────────────────────────────────────────────
 
@@ -689,9 +686,6 @@ class Planner:
             "oracle":          self._oracle.stats(),
         }
 
-    def _should_invoke_oracle(self, response: ToolResponse) -> bool:
-        """Deprecated — superseded by reflex().  Kept for external callers."""
-        return not self.reflex(response).is_definite()
 
     @staticmethod
     def _is_unrecoverable(response: ToolResponse) -> bool:

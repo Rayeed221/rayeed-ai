@@ -26,17 +26,10 @@ from planner import (  # noqa: F401  (re-exported for backwards compatibility)
     build_oracle_context,
 )
 
-# Tools watched by the dispatcher post-execution hook (subset of HIGH_VALUE_TOOLS)
-ORACLE_WATCHED_TOOLS = {
-    "arm_drone", "takeoff", "goto_position",
-    "return_to_launch", "land",
-}
-
 __all__ = [
     "HIGH_VALUE_TOOLS",
     "ORACLE_MODEL",
     "ORACLE_TIMEOUT",
-    "ORACLE_WATCHED_TOOLS",
     "VALID_DECISIONS",
     "ThinkingDecision",
     "ThinkingOracle",

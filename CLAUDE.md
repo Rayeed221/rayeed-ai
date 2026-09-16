@@ -61,9 +61,9 @@ In ArduPilot GUIDED mode, velocity commands are ephemeral — they override the 
 
 2. **LLM Orchestration** (`app.py` + `tools/declarations.py`) — Manages the Gemini Live session, system prompt (Bangla), function declarations, and the resilient receive loop. Session tasks (mic, send, receive, playback) are isolated from background tasks (telemetry, battery, position, avoidance) so a crash in one doesn't kill the other.
 
-3. **Mission Planning** (`planner.py` + `workflows/`) — Decision engine with 6 outcomes: `CONTINUE`, `WAIT`, `RETRY`, `REPLAN`, `ABORT`, `FAILSAFE`. The planner has **authority to override LLM decisions** for safety. Runs three tiers: `reflex()` (deterministic table, ~1 µs, resolves every hard safety gate and every nominal outcome, including the DroNet avoidance gate — `WAIT` while steering, `REPLAN` if stuck > 10 s), then the oracle only on `ReflexVerdict.UNKNOWN`, then the rule fallback. See `LATENCY.md`.
+3. **Mission Planning** (`planner.py` + `workflows/`) — Decision engine with 6 outcomes: `CONTINUE`, `WAIT`, `RETRY`, `REPLAN`, `ABORT`, `FAILSAFE`. The planner has **authority to override LLM decisions** for safety. Runs three tiers: `reflex()` (deterministic table, ~1 µs, resolves every hard safety gate and every nominal outcome, including the DroNet avoidance gate — `WAIT` while steering, `REPLAN` if stuck > 10 s), then the oracle only when `reflex()` returns no decision, then that `Reflex`'s own `fallback`. See `LATENCY.md`.
 
-4. **Safe Execution** (`tool_dispatcher.py` + `safety_policy.py` + `state_machine.py`) — 7-step pipeline: registry check → safety pre-check → execute (per-tool timeout via `timeout_for()`; 10s default, longer for `wait_*`) → state transition → update monitors → reset retry counter → return `ToolResponse`. Safety gates block operations on low battery, stale telemetry, altitude/speed violations, exceeded retry counts, **or active DroNet avoidance** (`goto_position` / `set_speed` are gated when `collision_prob ≥ AVOIDANCE_COLLISION_THR`).
+4. **Safe Execution** (`tool_dispatcher.py` + `safety_policy.py` + `state_machine.py`) — 7-step pipeline: registry check → safety pre-check → execute (deadline from `adapter.timeout_for()` — the backend owns it, since only the code that waits knows how long its wait takes) → state transition → update monitors → reset retry counter → return `ToolResponse`. Safety gates block operations on low battery, stale telemetry, altitude/speed violations, exceeded retry counts, **or active DroNet avoidance** (`goto_position` / `set_speed` are gated when `collision_prob ≥ AVOIDANCE_COLLISION_THR`).
 
 5. **Drone Backend** (`adapters/`) — Swappable via `DRONE_BACKEND` env var. `SimAdapter` (default) simulates all operations in memory. `MAVLinkAdapter` connects to real hardware.
 
@@ -79,7 +79,7 @@ In ArduPilot GUIDED mode, velocity commands are ephemeral — they override the 
 | `safety_policy.py` | Pre-execution gates: battery, telemetry, altitude, speed, retry limits, **avoidance** |
 | `planner.py` | Decision engine; Phase 1b avoidance gate; overrides LLM `next_action`; non-blocking waits |
 | `tool_registry.py` | Metadata for 25+ tools: description, arg schema, permission level, allowed states |
-| `schemas.py` | `ToolResponse` envelope (ok, tool, state, data, error, next_action, wait, confidence, timestamp) |
+| `schemas.py` | `ToolResponse` envelope (ok, tool, state, data, error, next_action, wait, confidence, timestamp); `for_wire()` is what goes back to the LLM |
 | `config.py` | All thresholds and env vars (API keys, audio rates, backend, safety limits, avoidance thresholds, latency knobs) |
 | `adapters/mavlink_cache.py` | `MAVLinkCache` — single-reader message blackboard; all MAVLink reads go through it |
 | `LATENCY.md` | Where latency goes in the voice path, what was changed, what is left |
@@ -92,7 +92,7 @@ Every drone command goes through `tool_dispatcher.py`:
 
 1. Registry check (tool exists?)
 2. Safety pre-check (battery ≥15%, telemetry fresh <5s, altitude <120m, speed <15 m/s, **avoidance inactive**, retries <3)
-3. Execute via adapter (10s timeout)
+3. Execute via adapter (`adapter.timeout_for(tool, args)`; 10s default, longer for MAVLink `wait_*`)
 4. State machine transition
 5. Update safety monitors
 6. Reset retry counter on success
@@ -227,12 +227,12 @@ All handler methods must remain **synchronous**. The dispatcher wraps every `ada
 
 **Never call `self._conn.recv_match()` from a handler.** Reads go through the message cache (`adapters/mavlink_cache.py`): one reader thread owns the socket and stores the latest message per type, and handlers read it in O(1). A blocking `recv_match(type=X)` discards every other message while it waits, so concurrent handlers steal each other's telemetry — and pymavlink connections are not thread-safe. Use:
 
-- `self._recv(msg_type, timeout)` — cached read, waits only if nothing is fresh
-- `self._cache.get(msg_type, max_age=...)` — pure cache read, never waits
-- `self._cache.wait(msg_type, timeout, match=...)` — poll the cache for a condition
-- `self._cache.wait_ack(command, since, timeout)` — correlate a `COMMAND_ACK`
+- `self._recv(msg_type, timeout)` — **the** read idiom: cached, waits only if nothing is fresh, and `timeout=0` never blocks. Per-stream staleness comes from `_STREAM_MAX_AGE`, so call sites do not pick a `max_age`.
+- `self._cache.wait(msg_type, timeout, match=...)` — wait for a *condition* (e.g. `set_mode` confirming a mode, `wait_altitude` reaching a target). Blocks on a condition variable, not a poll loop.
+- `self._cache.get_with_ts(msg_type, max_age=...)` — when the caller must tell one sample from the next (`wait_arrival` counting consecutive readings).
+- `self._cache.wait_ack(command, since, timeout)` — correlate a `COMMAND_ACK`.
 
-Sends must hold `self._send_lock`. Command handlers return `{"error": ...}` when not connected rather than raising — an unhandled exception costs a dispatcher retry and an extra LLM round trip.
+Sends must hold `self._send_lock`. `execute()` gates every handler but `connect_drone` on the connection, so handlers need no guard of their own — an unhandled exception would cost a dispatcher retry and an extra LLM round trip.
 
 ### Connection Pattern
 
@@ -241,7 +241,7 @@ from pymavlink import mavutil
 self._conn = mavutil.mavlink_connection(self._connection_string)
 self._conn.wait_heartbeat()
 self._request_streams()
-self._cache = MAVLinkCache(self._conn, msg_filter=self._accept_msg)
+self._cache = MAVLinkCache(self._conn, source_system=self._conn.target_system)
 self._cache.start()
 self._prime_cache()
 ```

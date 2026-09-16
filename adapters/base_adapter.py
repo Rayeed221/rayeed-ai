@@ -1,5 +1,8 @@
 from abc import ABC, abstractmethod
 
+# Default execution budget for a tool call that does not wait on the world.
+DEFAULT_TOOL_TIMEOUT_SEC = 10.0
+
 
 class BaseAdapter(ABC):
     """
@@ -19,3 +22,14 @@ class BaseAdapter(ABC):
     @abstractmethod
     def disconnect(self):
         ...
+
+    def timeout_for(self, tool_name: str, args: dict) -> float:
+        """
+        Execution deadline for one tool call, in seconds.
+
+        Lives on the backend because the numbers are properties of the backend,
+        not of the tool: only the code that does the waiting knows how long its
+        wait can legitimately take.  A backend that answers from memory keeps
+        this default; MAVLinkAdapter overrides it with its own wait budgets.
+        """
+        return DEFAULT_TOOL_TIMEOUT_SEC

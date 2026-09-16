@@ -16,9 +16,14 @@ Why this exists (latency):
     This is the "STATE" primitive of the drone grammar — a value that is
     always current, not a round trip that must be paid for.
 
+Scope:
+    One cache holds ONE vehicle's state.  ``source_system`` drops traffic from
+    anything else on the link — other GCS clients, including our own avoidance
+    layer, emit heartbeats that would otherwise corrupt mode detection.
+
 Thread safety:
-    ``get`` / ``age`` / ``wait`` / ``wait_ack`` are safe from any thread.
-    Sends stay in the adapter, serialised by its own lock.
+    ``get`` / ``get_with_ts`` / ``wait`` / ``wait_ack`` are safe from any
+    thread.  Sends stay in the adapter, serialised by its own lock.
 """
 
 import logging
@@ -32,21 +37,17 @@ logger = logging.getLogger(__name__)
 # responsive, long enough that an idle link does not spin the CPU.
 _RECV_TIMEOUT = 0.5
 
-# Cache polling granularity for wait() / wait_ack().
-_POLL_INTERVAL = 0.005
-
 
 class MAVLinkCache:
     """Latest-message-per-type cache fed by one background reader thread."""
 
-    def __init__(self, conn, poll_interval: float = _POLL_INTERVAL,
-                 msg_filter: Optional[Callable] = None):
-        self._conn   = conn
-        self._poll   = poll_interval
-        # Optional predicate: return False to drop a message before caching
-        # (used to ignore heartbeats from systems other than the autopilot).
-        self._filter = msg_filter
-        self._lock  = threading.Lock()
+    def __init__(self, conn, source_system: Optional[int] = None):
+        self._conn = conn
+        # Accept only this system's traffic.  None = accept everything (tests).
+        self._source_system = source_system
+        # Waiters block on this condition instead of polling, so an idle link
+        # costs zero wakeups and a waiter fires the instant its message lands.
+        self._cond = threading.Condition()
         self._latest: dict = {}   # msg_type -> (msg, monotonic_ts)
         self._acks:   dict = {}   # command_id -> (msg, monotonic_ts)
         self._thread: Optional[threading.Thread] = None
@@ -67,6 +68,8 @@ class MAVLinkCache:
 
     def stop(self, timeout: float = 2.0) -> None:
         self._stop.set()
+        with self._cond:
+            self._cond.notify_all()   # release any waiter immediately
         if self._thread is not None:
             self._thread.join(timeout=timeout)
             self._thread = None
@@ -93,43 +96,33 @@ class MAVLinkCache:
 
             try:
                 msg_type = msg.get_type()
+                if msg_type == "BAD_DATA":
+                    continue
+                if (self._source_system is not None
+                        and msg.get_srcSystem() != self._source_system):
+                    continue
             except Exception:
                 continue
 
-            if msg_type == "BAD_DATA":
-                continue
-
-            if self._filter is not None and not self._filter(msg):
-                continue
-
             now = time.monotonic()
-            with self._lock:
+            with self._cond:
                 self._latest[msg_type] = (msg, now)
                 if msg_type == "COMMAND_ACK":
                     # Keyed by command so a slow ACK cannot be mistaken for
                     # the ACK of a later, different command.
                     self._acks[getattr(msg, "command", -1)] = (msg, now)
+                self._cond.notify_all()
 
     # ── Reads ────────────────────────────────────────────────────────────────
-
-    def get(self, msg_type: str, max_age: Optional[float] = None):
-        """Latest cached message of this type, or None if absent/too old."""
-        with self._lock:
-            entry = self._latest.get(msg_type)
-        if entry is None:
-            return None
-        msg, ts = entry
-        if max_age is not None and (time.monotonic() - ts) > max_age:
-            return None
-        return msg
 
     def get_with_ts(self, msg_type: str, max_age: Optional[float] = None):
         """``(msg, monotonic_ts)`` for the latest message, or ``(None, None)``.
 
-        Use this instead of ``get`` when the caller needs to tell one sample
-        apart from the next (e.g. counting consecutive readings).
+        The one read primitive — everything else is built on it.  Use this over
+        ``get`` when the caller must tell one sample apart from the next (e.g.
+        counting consecutive readings).
         """
-        with self._lock:
+        with self._cond:
             entry = self._latest.get(msg_type)
         if entry is None:
             return None, None
@@ -138,11 +131,9 @@ class MAVLinkCache:
             return None, None
         return msg, ts
 
-    def age(self, msg_type: str) -> Optional[float]:
-        """Seconds since this type was last seen, or None if never seen."""
-        with self._lock:
-            entry = self._latest.get(msg_type)
-        return None if entry is None else time.monotonic() - entry[1]
+    def get(self, msg_type: str, max_age: Optional[float] = None):
+        """Latest cached message of this type, or None if absent/too old."""
+        return self.get_with_ts(msg_type, max_age)[0]
 
     def wait(
         self,
@@ -154,17 +145,13 @@ class MAVLinkCache:
         """
         Return a cached message satisfying the constraints, waiting if needed.
 
-        Polls the cache — it never touches the socket, so it cannot consume a
-        message another caller is waiting for.  Returns None on timeout.
+        Never touches the socket, so it cannot consume a message another caller
+        is waiting for.  ``timeout=0`` checks the cache once without blocking.
+        Returns None on timeout.
         """
-        deadline = time.monotonic() + timeout
-        while True:
-            msg = self.get(msg_type, max_age=max_age)
-            if msg is not None and (match is None or match(msg)):
-                return msg
-            if time.monotonic() >= deadline:
-                return None
-            time.sleep(self._poll)
+        return self._wait_until(
+            lambda: self._match_latest(msg_type, max_age, match), timeout
+        )
 
     def wait_ack(self, command: int, since: float, timeout: float = 10.0):
         """
@@ -172,19 +159,57 @@ class MAVLinkCache:
         (a ``time.monotonic()`` stamp taken just before the send).
         Returns the message, or None on timeout.
         """
+        return self._wait_until(lambda: self._match_ack(command, since), timeout)
+
+    # ── Internals ────────────────────────────────────────────────────────────
+
+    def _match_latest(self, msg_type: str, max_age, match):
+        """Caller must hold ``self._cond``."""
+        entry = self._latest.get(msg_type)
+        if entry is None:
+            return None
+        msg, ts = entry
+        if max_age is not None and (time.monotonic() - ts) > max_age:
+            return None
+        if match is not None and not match(msg):
+            return None
+        return msg
+
+    def _match_ack(self, command: int, since: float):
+        """Caller must hold ``self._cond``."""
+        entry = self._acks.get(command)
+        if entry is not None and entry[1] >= since:
+            return entry[0]
+        return None
+
+    def _wait_until(self, predicate: Callable, timeout: float):
+        """
+        Block until `predicate()` returns a non-None value or `timeout` expires.
+
+        The predicate is evaluated under the lock and re-run only when the
+        reader thread stores a new message, so a stale cached value is never
+        re-tested in a spin.
+        """
         deadline = time.monotonic() + timeout
-        while True:
-            with self._lock:
-                entry = self._acks.get(command)
-            if entry is not None and entry[1] >= since:
-                return entry[0]
-            if time.monotonic() >= deadline:
-                return None
-            time.sleep(self._poll)
+        with self._cond:
+            while True:
+                found = predicate()
+                if found is not None:
+                    return found
+                if self._stop.is_set():
+                    # The reader is gone, so no message can still arrive —
+                    # otherwise a long wait (wait_arrival budgets 120 s) would
+                    # hold up shutdown for its full timeout.
+                    return None
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                self._cond.wait(remaining)
 
     # ── Diagnostics ──────────────────────────────────────────────────────────
 
     def stats(self) -> dict:
-        with self._lock:
-            types = {t: round(time.monotonic() - ts, 3) for t, (_, ts) in self._latest.items()}
-        return {"running": self.is_running(), "errors": self._errors, "ages_sec": types}
+        now = time.monotonic()
+        with self._cond:
+            ages = {t: round(now - ts, 3) for t, (_, ts) in self._latest.items()}
+        return {"running": self.is_running(), "errors": self._errors, "ages_sec": ages}

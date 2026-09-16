@@ -5,7 +5,10 @@ Covers:
   - JSON parsing from content and thinking block
   - Rule fallback thresholds (mirror safety_policy.py)
   - ThinkingDecision field validation
-  - Oracle gate (should_invoke) + compact output grammar
+  - Compact output grammar
+
+When the oracle is consulted at all is Planner.reflex()'s decision — see
+tests/test_drone/test_failures.py.
   - Stats tracking
 
 Run:
@@ -19,7 +22,6 @@ from planner import (
     ThinkingOracle,
     ThinkingDecision,
     VALID_DECISIONS,
-    HIGH_VALUE_TOOLS,
 )
 
 
@@ -28,6 +30,13 @@ from planner import (
 @pytest.fixture
 def oracle():
     return ThinkingOracle(model="droneoracle")
+
+
+def patch_chat(return_value=None, side_effect=None):
+    """Patch the ollama client the oracle builds in ThinkingOracle._chat."""
+    client = MagicMock()
+    client.chat = MagicMock(return_value=return_value, side_effect=side_effect)
+    return patch("ollama.Client", return_value=client)
 
 
 def make_ctx(**overrides) -> dict:
@@ -181,33 +190,6 @@ def test_from_dict_none_wait_sec(oracle):
     assert result.wait_sec is None
 
 
-# ── Oracle gate ───────────────────────────────────────────────────────────────
-
-def test_should_invoke_only_on_critical_failure(oracle):
-    """
-    The gate narrowed deliberately: a *successful* high-value call and merely
-    being airborne are not ambiguous, and invoking a local LLM for them put a
-    full generation inside every voice round trip.  Planner.reflex() now owns
-    this decision; should_invoke is the coarse gate for callers outside it.
-    """
-    assert oracle.should_invoke("goto_position", ok=False, airborne=False) is True
-    assert oracle.should_invoke("arm_drone",     ok=False, airborne=True)  is True
-
-    assert oracle.should_invoke("goto_position", ok=True,  airborne=False) is False
-    assert oracle.should_invoke("takeoff",       ok=True,  airborne=True)  is False
-
-
-def test_should_not_invoke_for_trivial_read(oracle):
-    assert oracle.should_invoke("get_telemetry", ok=False, airborne=False) is False
-    assert oracle.should_invoke("get_telemetry", ok=True,  airborne=True)  is False
-
-
-def test_should_not_invoke_read_only_grounded(oracle):
-    assert oracle.should_invoke("get_telemetry", ok=True,  airborne=False) is False
-    assert oracle.should_invoke("get_battery",   ok=True,  airborne=False) is False
-    assert oracle.should_invoke("get_position_str", ok=True, airborne=False) is False
-
-
 # ── Stats ─────────────────────────────────────────────────────────────────────
 
 def test_stats_initial(oracle):
@@ -218,7 +200,7 @@ def test_stats_initial(oracle):
 
 
 def test_stats_increments_on_ollama_failure(oracle):
-    with patch("ollama.chat", side_effect=Exception("connection refused")):
+    with patch_chat(side_effect=Exception("connection refused")):
         oracle.deliberate(make_ctx())
     s = oracle.stats()
     assert s["calls"] == 1
@@ -234,11 +216,12 @@ def test_stats_no_failure_on_successful_parse(oracle):
         '"wait_sec": null, "reason": "ok", "confidence": 0.99}'
     )
 
-    with patch("ollama.chat", return_value=mock_resp):
+    with patch_chat(return_value=mock_resp):
         td = oracle.deliberate(make_ctx())
 
     assert td.decision == "CONTINUE"
     assert td.source   == "oracle"
+    assert oracle.busy is False        # worker clears the single-flight flag
     s = oracle.stats()
     assert s["failures"] == 0
 
@@ -276,7 +259,7 @@ def test_deliberate_accepts_compact_line(oracle):
     mock_resp = MagicMock()
     mock_resp.message.content = "FAILSAFE | battery 12% below critical"
 
-    with patch("ollama.chat", return_value=mock_resp):
+    with patch_chat(return_value=mock_resp):
         td = oracle.deliberate(make_ctx(battery_pct=12.0))
 
     assert td.decision == "FAILSAFE"
@@ -293,7 +276,7 @@ def test_deliberate_streams_when_thinking_enabled(oracle):
     chunk.message.content  = "CONTINUE | nominal"
 
     with patch.object(planner_mod, "ORACLE_THINK", True), \
-         patch("ollama.chat", return_value=iter([chunk])):
+         patch_chat(return_value=iter([chunk])):
         td = oracle.deliberate(make_ctx())
 
     assert td.decision == "CONTINUE"
@@ -310,3 +293,11 @@ def test_json_parse_no_longer_swallowed_by_attribute_error(oracle):
     parsed = ThinkingOracle._parse_json('{"decision": "REPLAN", "reason": "low battery"}')
     assert parsed is not None
     assert parsed.decision == "REPLAN"
+
+
+def test_busy_flag_is_cleared_even_when_ollama_fails(oracle):
+    """The single-flight guard must not latch on — it is cleared by the worker
+    thread, because the planner's deadline abandons the wait, not the work."""
+    with patch_chat(side_effect=Exception("connection refused")):
+        oracle.deliberate(make_ctx())
+    assert oracle.busy is False

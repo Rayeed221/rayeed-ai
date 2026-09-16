@@ -14,60 +14,16 @@ import pytest
 
 from adapters.mavlink_cache import MAVLinkCache
 
-
-# ── Fakes ─────────────────────────────────────────────────────────────────────
-
-class FakeMsg:
-    def __init__(self, msg_type: str, src_system: int = 1, **fields):
-        self._type = msg_type
-        self._src  = src_system
-        for k, v in fields.items():
-            setattr(self, k, v)
-
-    def get_type(self):
-        return self._type
-
-    def get_srcSystem(self):
-        return self._src
-
-
-class FakeConn:
-    """Hands out queued messages, then blocks like a quiet link would."""
-
-    def __init__(self, messages=None):
-        self._queue = list(messages or [])
-        self._lock  = threading.Lock()
-        self.calls  = 0
-
-    def push(self, msg):
-        with self._lock:
-            self._queue.append(msg)
-
-    def recv_match(self, blocking=True, timeout=0.5, **kwargs):
-        self.calls += 1
-        with self._lock:
-            if self._queue:
-                return self._queue.pop(0)
-        time.sleep(min(timeout, 0.01))
-        return None
+from conftest import FakeConn, FakeMsg, wait_for as _wait_for
 
 
 @pytest.fixture
 def cache():
     conn = FakeConn()
-    c = MAVLinkCache(conn, poll_interval=0.001)
+    c = MAVLinkCache(conn)
     c._conn_for_test = conn          # convenience handle for the tests
     yield c
     c.stop()
-
-
-def _wait_for(predicate, timeout=2.0):
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if predicate():
-            return True
-        time.sleep(0.005)
-    return False
 
 
 # ── Reader lifecycle ──────────────────────────────────────────────────────────
@@ -93,7 +49,7 @@ def test_reader_survives_recv_exceptions():
                 raise OSError("link dropped")
             return FakeMsg("HEARTBEAT", custom_mode=4)
 
-    c = MAVLinkCache(Exploding(), poll_interval=0.001)
+    c = MAVLinkCache(Exploding())
     c.start()
     try:
         assert _wait_for(lambda: c.get("HEARTBEAT") is not None)
@@ -137,15 +93,14 @@ def test_bad_data_is_not_cached(cache):
     assert cache.get("BAD_DATA") is None
 
 
-def test_msg_filter_drops_rejected_messages():
+def test_source_system_drops_other_vehicles():
+    """One cache holds ONE vehicle's state.  Our own avoidance layer emits GCS
+    heartbeats on the same link, and caching one would corrupt mode detection."""
     conn = FakeConn([
         FakeMsg("HEARTBEAT", src_system=254, custom_mode=0),   # another GCS
         FakeMsg("HEARTBEAT", src_system=1,   custom_mode=4),   # the autopilot
     ])
-    c = MAVLinkCache(
-        conn, poll_interval=0.001,
-        msg_filter=lambda m: m.get_srcSystem() == 1,
-    )
+    c = MAVLinkCache(conn, source_system=1)
     c.start()
     try:
         assert _wait_for(lambda: c.get("HEARTBEAT") is not None)
@@ -153,6 +108,27 @@ def test_msg_filter_drops_rejected_messages():
         assert c.get("HEARTBEAT").custom_mode == 4   # the foreign one never landed
     finally:
         c.stop()
+
+
+def test_source_system_filters_every_type_not_just_heartbeat():
+    conn = FakeConn([
+        FakeMsg("GLOBAL_POSITION_INT", src_system=99, relative_alt=9999),
+        FakeMsg("GLOBAL_POSITION_INT", src_system=1,  relative_alt=1000),
+    ])
+    c = MAVLinkCache(conn, source_system=1)
+    c.start()
+    try:
+        assert _wait_for(lambda: c.get("GLOBAL_POSITION_INT") is not None)
+        time.sleep(0.05)
+        assert c.get("GLOBAL_POSITION_INT").relative_alt == 1000
+    finally:
+        c.stop()
+
+
+def test_no_source_system_accepts_everything(cache):
+    cache._conn_for_test.push(FakeMsg("HEARTBEAT", src_system=254, custom_mode=7))
+    cache.start()
+    assert _wait_for(lambda: cache.get("HEARTBEAT") is not None)
 
 
 def test_get_with_ts_distinguishes_samples(cache):
@@ -165,12 +141,13 @@ def test_get_with_ts_distinguishes_samples(cache):
     assert _wait_for(lambda: cache.get_with_ts("VFR_HUD")[1] != first)
 
 
-def test_age_tracks_last_seen(cache):
-    assert cache.age("HEARTBEAT") is None
+def test_get_with_ts_reports_absence(cache):
+    assert cache.get_with_ts("HEARTBEAT") == (None, None)
     cache._conn_for_test.push(FakeMsg("HEARTBEAT", custom_mode=4))
     cache.start()
-    assert _wait_for(lambda: cache.age("HEARTBEAT") is not None)
-    assert cache.age("HEARTBEAT") < 1.0
+    assert _wait_for(lambda: cache.get("HEARTBEAT") is not None)
+    _, ts = cache.get_with_ts("HEARTBEAT")
+    assert time.monotonic() - ts < 1.0
 
 
 # ── Waiting ───────────────────────────────────────────────────────────────────
@@ -287,3 +264,34 @@ def test_stats_reports_tracked_types(cache):
     stats = cache.stats()
     assert stats["running"] is True
     assert "HEARTBEAT" in stats["ages_sec"]
+
+
+def test_wait_with_zero_timeout_checks_once_without_blocking(cache):
+    """The adapter reads optional streams with timeout=0 — it must never block."""
+    cache.start()
+    t0 = time.monotonic()
+    assert cache.wait("VFR_HUD", timeout=0.0) is None
+    assert time.monotonic() - t0 < 0.1
+
+    cache._conn_for_test.push(FakeMsg("VFR_HUD", groundspeed=1.0))
+    assert _wait_for(lambda: cache.wait("VFR_HUD", timeout=0.0) is not None)
+
+
+def test_waiter_wakes_on_arrival_not_on_a_poll_tick(cache):
+    """Condition-based wait should return promptly once the message lands."""
+    cache.start()
+    threading.Timer(
+        0.05, lambda: cache._conn_for_test.push(FakeMsg("SYS_STATUS", voltage_battery=11000))
+    ).start()
+    t0 = time.monotonic()
+    msg = cache.wait("SYS_STATUS", timeout=2.0)
+    assert msg is not None
+    assert time.monotonic() - t0 < 0.5
+
+
+def test_stop_releases_a_blocked_waiter(cache):
+    cache.start()
+    threading.Timer(0.05, cache.stop).start()
+    t0 = time.monotonic()
+    assert cache.wait("NEVER_ARRIVES", timeout=3.0) is None
+    assert time.monotonic() - t0 < 3.0

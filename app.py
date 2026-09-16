@@ -35,7 +35,6 @@ from config import (
     VISION_CAMERA_PITCH_DEG, VISION_CAMERA_YAW_DEG, VISION_CAMERA_HFOV_DEG,
     YOLO_BLOB_DIR, YOLO_AUTO_DOWNLOAD,
     AUDIO_DEVICE_ID,
-    COMPACT_TOOL_RESPONSE,
     DRONET_MODEL_PATH,
     VIOSLAM_ENABLED, VIOSLAM_DB_PATH, VIOSLAM_LOAD_DB,
     VIOSLAM_FPS, VIOSLAM_SLAM_HZ, VIOSLAM_OCC_CELL_SIZE,
@@ -375,11 +374,7 @@ class DroneAI:
                                         types.FunctionResponse(
                                             id=fc.id,
                                             name=fc.name,
-                                            response=(
-                                                tool_resp.to_llm()
-                                                if COMPACT_TOOL_RESPONSE
-                                                else tool_resp.to_dict()
-                                            ),
+                                            response=tool_resp.for_wire(),
                                         )
                                     ]
                                 )

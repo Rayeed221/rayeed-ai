@@ -58,9 +58,12 @@ is always current, not a round trip that has to be paid for.
 - `COMMAND_ACK` is correlated by command id *and* a send timestamp, so a late
   ACK for one command can no longer satisfy the wait for another.
 - Sends are serialised by a lock.
-- The reader thread filters out HEARTBEATs from other systems — our own
-  avoidance layer emits GCS heartbeats, and caching one would corrupt mode
-  detection.
+- One cache holds one vehicle's state: `source_system` drops everything from
+  other systems on the link — our own avoidance layer opens a second connection
+  and emits GCS heartbeats, and caching one would corrupt mode detection.
+- Waiters block on a `threading.Condition` rather than polling, so an idle link
+  costs zero wakeups and a waiter fires the instant its message lands. `stop()`
+  releases them, so shutdown never waits out a 120 s arrival budget.
 
 ### 2. `set_mode` confirmed itself against a 1 Hz stream
 
@@ -81,11 +84,15 @@ returned `next_action="retry"`, burned a retry counter and an extra LLM round
 trip — while the orphaned thread kept running and kept consuming MAVLink
 messages. Every takeoff paid this.
 
-**Fixed** — `tool_dispatcher.timeout_for()` gives each tool a budget that
-matches what it is actually waiting for (`wait_time` derives its budget from
-its own argument). The wait loops themselves now poll the cache at 20 Hz
-instead of doing a 2 s blocking read plus a 0.2 s sleep per iteration, so they
-also detect arrival up to ~2.2 s sooner.
+**Fixed** — `BaseAdapter.timeout_for()` gives each call a budget that matches
+what it is actually waiting for, and it lives on the *backend* because the
+numbers describe the backend, not the tool: `MAVLinkAdapter` overrides it with
+its own wait constants (and derives `wait_time`'s budget from its own argument,
+since it is the one that sleeps), while `SimAdapter` answers from memory and
+keeps the 10 s default. `wait_altitude` is now a single
+`cache.wait(match=...)` — it wakes the moment the altitude matches, where the
+old loop did a 2 s blocking read plus a 0.2 s sleep per iteration and so
+detected arrival up to ~2.2 s late.
 
 ### 4. A local LLM inside every voice round trip
 
@@ -117,8 +124,8 @@ Worse, three things made that cost pure waste:
 | Tier | What it is | Cost |
 | --- | --- | --- |
 | 1. `reflex()` | deterministic table; every hard safety gate and every nominal outcome | **1.1 µs** (measured) |
-| 2. oracle | consulted only on `ReflexVerdict.UNKNOWN` — a *repeated* failure of a flight-critical tool | bounded by `ORACLE_DEADLINE_SEC` (1.5 s) |
-| 3. rule fallback | same thresholds as `safety_policy.py` | microseconds |
+| 2. oracle | consulted only when `reflex()` returns no decision — a *repeated* failure of a flight-critical tool | bounded by `ORACLE_DEADLINE_SEC` (1.5 s) |
+| 3. fallback | the `Reflex` from tier 1 carries what to do anyway, so there is no second rule table | free |
 
 The decision *contract* is unchanged — `reflex()` evaluates the same gates in
 the same order the old Phase 1/Phase 3 did, and `tests/test_drone/test_failures.py`
@@ -128,8 +135,13 @@ Also in this tier:
 
 - a real deadline (`asyncio.wait_for`), so the oracle can never hold up a tool
   result;
-- a single-flight guard — a second caller falls straight through to the rules
-  rather than queueing behind the first on a one-model backend;
+- a single-flight guard on the oracle, cleared by the worker thread — the
+  deadline abandons the *wait*, not the generation, so only the thread knows
+  when Ollama is free again. A second caller falls straight through to the
+  rules rather than queueing behind the first on a one-model backend;
+- a real client-side HTTP timeout (`ollama.Client(timeout=...)`), so an
+  abandoned call stops generating instead of burning CPU for nobody —
+  `ThinkingOracle._timeout` was previously assigned and never read;
 - `_from_dict` moved onto `ThinkingDecision`, so oracle output is finally parsed;
 - `think=False`, `num_predict=32`, a newline stop token, and `keep_alive` so the
   model stays resident;

@@ -72,6 +72,16 @@ class ToolResponse:
             out["confidence"] = self.confidence
         return out
 
+    def for_wire(self) -> dict:
+        """
+        What actually goes back to the Live model.
+
+        Callers ask for "the wire format" and know nothing about which one it
+        is; COMPACT_TOOL_RESPONSE=0 restores the full dict as a kill switch.
+        """
+        from config import COMPACT_TOOL_RESPONSE
+        return self.to_llm() if COMPACT_TOOL_RESPONSE else self.to_dict()
+
     def sentence(self) -> str:
         """
         One-line symbolic form for logs and mission memory:

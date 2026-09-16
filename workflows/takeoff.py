@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 async def _oracle_step(
-    dispatcher, planner, tool_name: str, args: dict, sm, safety,
+    dispatcher, planner, tool_name: str, args: dict,
     max_retries: int = 3,
 ) -> tuple:
     """
@@ -80,7 +80,7 @@ async def run_takeoff(dispatcher, sm, safety, planner, altitude: float = 10.0) -
     ]
 
     for tool_name, args in steps:
-        ok, data = await _oracle_step(dispatcher, planner, tool_name, args, sm, safety)
+        ok, data = await _oracle_step(dispatcher, planner, tool_name, args)
         if not ok:
             logger.error(f"[TAKEOFF] Failed at step: {tool_name}")
             return False

@@ -13,25 +13,14 @@ import pytest
 
 from adapters.mavlink_adapter import MAVLinkAdapter
 
+from conftest import FakeConn, FakeMsg
+
 
 # ── Fakes ─────────────────────────────────────────────────────────────────────
 
-class FakeMsg:
-    def __init__(self, msg_type="HEARTBEAT", **fields):
-        self._type = msg_type
-        for k, v in fields.items():
-            setattr(self, k, v)
-
-    def get_type(self):
-        return self._type
-
-    def get_srcSystem(self):
-        return 1
-
-
 class FakeCache:
-    """Serves messages from a dict; records every wait so the tests can assert
-    that the fast paths did not fall back to waiting."""
+    """Serves messages from a dict; records every blocking wait so the tests
+    can assert that the fast paths never had to wait."""
 
     def __init__(self, messages=None):
         self.messages = dict(messages or {})
@@ -45,11 +34,9 @@ class FakeCache:
         msg = self.messages.get(msg_type)
         return (msg, time.monotonic()) if msg is not None else (None, None)
 
-    def age(self, msg_type):
-        return 0.0 if msg_type in self.messages else None
-
     def wait(self, msg_type, timeout=5.0, max_age=None, match=None):
-        self.waits.append(msg_type)
+        if timeout:                       # timeout=0 is a non-blocking peek
+            self.waits.append(msg_type)
         msg = self.messages.get(msg_type)
         if msg is not None and (match is None or match(msg)):
             return msg
@@ -73,19 +60,10 @@ class FakeMav:
         self.sent.append(("set_position_target", args))
 
 
-class FakeConn:
-    def __init__(self):
-        self.mav = FakeMav()
-        self.target_system    = 1
-        self.target_component = 1
-
-    def close(self):
-        pass
-
-
 def make_adapter(messages=None):
     adapter = MAVLinkAdapter("udp:127.0.0.1:14550")
-    adapter._conn  = FakeConn()
+    adapter._conn = FakeConn()
+    adapter._conn.mav = FakeMav()
     adapter._cache = FakeCache(messages)
     return adapter
 
@@ -105,7 +83,8 @@ def test_get_telemetry_reads_the_cache(monkeypatch):
     assert result == {
         "altitude": 12.34, "airspeed": 2.5, "groundspeed": 2.4, "heading": 271.0,
     }
-    assert adapter._cache.waits == []      # pure cache hit, no blocking wait
+    # VFR_HUD is optional and read with timeout=0, so it never blocks
+    assert "VFR_HUD" not in adapter._cache.waits
 
 
 def test_get_telemetry_tolerates_missing_vfr_hud():
