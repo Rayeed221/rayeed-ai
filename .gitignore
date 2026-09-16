@@ -48,4 +48,5 @@ vision/standalone/.cache
 map.db-journal
 resume.txt
 .cache/
-mav*
+mav.parm
+mav.tlog*
