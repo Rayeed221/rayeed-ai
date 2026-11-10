@@ -1,0 +1,865 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RayeedAI Mission Brief</title>
+<meta name="description" content="Interactive brief: RayeedAI voice-controlled autonomous drone platform with Defense and Firefighting mission variants.">
+<style>
+:root{
+  --bg:#0b1016; --bg2:#111923; --panel:#16212d; --panel2:#1c2a39; --line:#2a3b4d;
+  --text:#e6edf3; --muted:#93a4b5; --dim:#6b7d8f;
+  --accent:#4fb3ff; --accent2:#7ee0c3;
+  --def:#9bbf5a; --def-bg:rgba(155,191,90,.12);
+  --fire:#ff8a3d; --fire-bg:rgba(255,138,61,.12);
+  --ok:#3fcf8e; --warn:#f2c14e; --bad:#ff5d5d; --info:#4fb3ff;
+  --banner:#2f6b3a; --banner-text:#eaffea;
+  --shadow:0 10px 30px rgba(0,0,0,.35);
+  --radius:14px;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+}
+:root[data-theme="light"]{
+  --bg:#f4f6f9; --bg2:#eaeef3; --panel:#ffffff; --panel2:#f1f4f8; --line:#d3dbe4;
+  --text:#14202c; --muted:#4b5d6f; --dim:#7a8a9a;
+  --accent:#0a6fc2; --accent2:#0c8f6c;
+  --def:#4f7a16; --def-bg:rgba(79,122,22,.10);
+  --fire:#c7530c; --fire-bg:rgba(199,83,12,.10);
+  --ok:#14945c; --warn:#a87800; --bad:#c62828; --info:#0a6fc2;
+  --banner:#2f6b3a; --banner-text:#ffffff;
+  --shadow:0 8px 24px rgba(20,32,44,.10);
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);}
+body{overflow:hidden}
+button{font:inherit;color:inherit}
+.banner{position:fixed;left:0;right:0;height:24px;display:flex;align-items:center;justify-content:center;
+  background:var(--banner);color:var(--banner-text);font:600 11px/1 var(--mono);letter-spacing:.14em;z-index:50;text-transform:uppercase;white-space:nowrap;overflow:hidden;padding:0 8px}
+@media (max-width:600px){.banner{letter-spacing:.04em;font-size:9.5px}}
+.banner.top{top:0}.banner.bottom{bottom:0}
+.deck{position:fixed;inset:24px 0 24px 0;}
+.slide{position:absolute;inset:0;padding:28px clamp(16px,5vw,72px) 84px;overflow-y:auto;
+  opacity:0;visibility:hidden;transform:translateX(30px);transition:opacity .35s ease,transform .35s ease,visibility 0s linear .35s}
+.slide.active{opacity:1;visibility:visible;transform:none;transition:opacity .35s ease,transform .35s ease}
+.slide.prev{transform:translateX(-30px)}
+.inner{max-width:1180px;margin:0 auto}
+.kicker{font:600 12px/1 var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin:4px 0 10px}
+.kicker.def{color:var(--def)}.kicker.fire{color:var(--fire)}
+h1{font-size:clamp(30px,5vw,56px);line-height:1.05;margin:0 0 14px;letter-spacing:-.02em}
+h2{font-size:clamp(24px,3.4vw,38px);line-height:1.1;margin:0 0 10px;letter-spacing:-.01em}
+h3{font-size:17px;margin:0 0 6px}
+p{line-height:1.55;color:var(--muted);margin:0 0 10px}
+.lead{font-size:clamp(16px,1.6vw,19px);color:var(--muted);max-width:820px}
+.grid{display:grid;gap:14px}
+.g2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.g3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.g4{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media (max-width:860px){.g2,.g3,.g4{grid-template-columns:1fr}}
+@media (min-width:861px) and (max-width:1100px){.g4{grid-template-columns:repeat(2,1fr)}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow)}
+.card p{font-size:14.5px;margin:0}
+.card ul{margin:6px 0 0;padding-left:18px;color:var(--muted);font-size:14.5px;line-height:1.55}
+.card.def{border-top:3px solid var(--def)}.card.fire{border-top:3px solid var(--fire)}.card.acc{border-top:3px solid var(--accent)}
+.tag{display:inline-block;font:600 11px/1 var(--mono);padding:5px 8px;border-radius:99px;border:1px solid var(--line);color:var(--muted);margin:0 6px 6px 0;letter-spacing:.04em}
+.tag.ok{color:var(--ok);border-color:currentColor}.tag.warn{color:var(--warn);border-color:currentColor}
+.tag.bad{color:var(--bad);border-color:currentColor}.tag.def{color:var(--def);border-color:currentColor}.tag.fire{color:var(--fire);border-color:currentColor}
+.summary{margin-top:18px;border:1px solid var(--line);border-left:4px solid var(--accent2);background:var(--panel2);border-radius:10px;padding:12px 16px}
+.summary > b{display:block;font:700 11px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--accent2);margin-bottom:6px}
+.summary p{margin:0;color:var(--text);font-size:14.5px}
+.note{font-size:12px;color:var(--dim);margin-top:8px}
+.stat{font-size:clamp(28px,3.4vw,40px);font-weight:750;letter-spacing:-.02em;color:var(--text)}
+.stat small{font-size:14px;color:var(--muted);font-weight:500;margin-left:4px}
+.statlabel{font-size:13px;color:var(--muted)}
+.mono{font-family:var(--mono)}
+/* hero */
+.hero{display:grid;grid-template-columns:1.2fr .8fr;gap:30px;align-items:center;min-height:calc(100vh - 200px)}
+@media (max-width:860px){.hero{grid-template-columns:1fr}}
+.hero svg{width:100%;height:auto}
+/* controls */
+.nav{position:fixed;bottom:34px;left:50%;transform:translateX(-50%);display:flex;gap:6px;align-items:center;z-index:40;
+  background:var(--panel);border:1px solid var(--line);border-radius:99px;padding:6px;box-shadow:var(--shadow)}
+.nav button{background:transparent;border:0;border-radius:99px;padding:7px 12px;cursor:pointer;color:var(--muted);font-size:13px}
+.nav button:hover{background:var(--panel2);color:var(--text)}
+.nav .count{font:600 12px/1 var(--mono);color:var(--muted);min-width:58px;text-align:center}
+.progress{position:fixed;top:24px;left:0;height:3px;background:var(--accent);z-index:45;transition:width .3s}
+/* overview */
+.overview{position:fixed;inset:24px 0;background:var(--bg);z-index:60;overflow:auto;padding:28px clamp(16px,4vw,48px);display:none}
+.overview.show{display:block}
+.overview .ogrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;max-width:1200px;margin:16px auto}
+.overview button{text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;cursor:pointer}
+.overview button:hover,.overview button.cur{border-color:var(--accent)}
+.overview .on{font:600 11px var(--mono);color:var(--accent)}
+.overview .ot{display:block;margin-top:6px;font-weight:650}
+.overview .os{display:block;margin-top:4px;font-size:12.5px;color:var(--muted)}
+/* architecture */
+.arch{display:grid;grid-template-columns:1fr;gap:10px}
+.archrow{display:flex;gap:8px;flex-wrap:wrap;align-items:stretch}
+.node{flex:1 1 120px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;text-align:left;transition:border-color .2s,transform .2s}
+.node:hover{transform:translateY(-2px)}
+.node.sel{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 30%,transparent)}
+.node .nt{font-weight:650;font-size:14px}.node .ns{font-size:12px;color:var(--muted);margin-top:3px;display:block}
+.node.l2{border-style:dashed}
+.layerlbl{font:600 11px var(--mono);letter-spacing:.14em;color:var(--dim);text-transform:uppercase;margin:6px 0 0}
+.arrow{color:var(--dim);font-size:12px;text-align:center;font-family:var(--mono)}
+.detail{min-height:120px}
+.detail code{font-family:var(--mono);font-size:12.5px;color:var(--accent2)}
+/* pipeline */
+.cmds{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.cmd{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 12px;cursor:pointer;font-size:13.5px;text-align:left}
+.cmd:hover,.cmd.sel{border-color:var(--accent)}
+.cmd .tr{display:block;font-size:11.5px;color:var(--dim);margin-top:2px}
+.steps{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;margin:10px 0}
+@media (max-width:860px){.steps{grid-template-columns:1fr 1fr}}
+.step{border:1px solid var(--line);border-radius:10px;padding:9px;background:var(--panel);font-size:12.5px;min-height:82px;transition:all .25s}
+.step .sn{font:700 11px var(--mono);color:var(--dim)}
+.step .st{display:block;font-weight:600;margin-top:3px}
+.step .sr{display:block;color:var(--muted);margin-top:4px;font-size:11.5px}
+.step.run{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--panel))}
+.step.pass{border-color:var(--ok)}.step.pass .sn{color:var(--ok)}
+.step.fail{border-color:var(--bad);background:color-mix(in srgb,var(--bad) 10%,var(--panel))}.step.fail .sn{color:var(--bad)}
+.step.skip{opacity:.4}
+pre.json{font:12.5px/1.5 var(--mono);background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:12px;overflow:auto;margin:0;color:var(--text);max-height:260px;white-space:pre-wrap}
+/* simulator */
+.sim{display:grid;grid-template-columns:1.1fr .9fr;gap:16px}
+@media (max-width:860px){.sim{grid-template-columns:1fr}}
+.ctl{margin:10px 0}
+.ctl label{display:flex;justify-content:space-between;font-size:13.5px;color:var(--muted)}
+.ctl label b{color:var(--text);font-family:var(--mono)}
+input[type=range]{width:100%;accent-color:var(--accent)}
+select,.sel-in{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:7px 9px;font:inherit;font-size:13.5px;width:100%}
+.chk{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--muted);margin:8px 0}
+.verdict{border-radius:12px;padding:16px;border:2px solid var(--line);text-align:center}
+.verdict .vd{font:800 28px/1 var(--mono);letter-spacing:.06em}
+.verdict .vr{font-size:13.5px;color:var(--muted);margin-top:8px}
+.verdict.ok{border-color:var(--ok)}.verdict.ok .vd{color:var(--ok)}
+.verdict.warn{border-color:var(--warn)}.verdict.warn .vd{color:var(--warn)}
+.verdict.bad{border-color:var(--bad)}.verdict.bad .vd{color:var(--bad)}
+.gates{list-style:none;padding:0;margin:12px 0 0;font-size:13px}
+.gates li{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px dashed var(--line)}
+.gates li span:last-child{font:600 12px var(--mono)}
+.g-ok{color:var(--ok)}.g-warn{color:var(--warn)}.g-bad{color:var(--bad)}.g-na{color:var(--dim)}
+/* state machine */
+.sm{display:grid;grid-template-columns:1.2fr .8fr;gap:16px}
+@media (max-width:860px){.sm{grid-template-columns:1fr}}
+.sm svg{width:100%;height:auto;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius)}
+.sm svg .st-node{cursor:pointer}
+.sm svg .st-node rect{fill:var(--panel2);stroke:var(--line);stroke-width:1.5;transition:all .2s}
+.sm svg .st-node text{fill:var(--text);font:600 12px var(--mono);pointer-events:none}
+.sm svg .st-node.sel rect{stroke:var(--accent);stroke-width:2.5;fill:color-mix(in srgb,var(--accent) 16%,var(--panel2))}
+.sm svg .st-node.nxt rect{stroke:var(--ok);stroke-width:2}
+.sm svg .st-node.fs rect{stroke:var(--bad)}
+.sm svg path.edge{fill:none;stroke:var(--line);stroke-width:1.4;marker-end:url(#arr)}
+.sm svg path.edge.hot{stroke:var(--ok);stroke-width:2.2;marker-end:url(#arrHot)}
+.toollist{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+.toollist span{font:11.5px var(--mono);padding:4px 7px;border-radius:6px;background:var(--bg2);border:1px solid var(--line)}
+.toollist span.critical{border-color:var(--bad);color:var(--bad)}
+.toollist span.write{border-color:var(--warn);color:var(--warn)}
+/* chain / stepper */
+.chain{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0}
+.link{flex:1 1 130px;border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:10px;cursor:pointer;text-align:left;font-size:13px;position:relative}
+.link .who{font:700 10.5px var(--mono);letter-spacing:.12em;text-transform:uppercase;display:block;margin-bottom:4px}
+.link .who.ai{color:var(--accent)}.link .who.human{color:var(--warn)}.link .who.hw{color:var(--bad)}
+.link.sel{border-color:var(--accent)}
+.link.done{opacity:.95;border-color:var(--ok)}
+.link.locked{opacity:.45;cursor:not-allowed}
+.chaindetail{min-height:96px}
+.btnrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.btn{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:8px 13px;cursor:pointer;font-size:13.5px}
+.btn:hover{border-color:var(--accent)}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:#04121f;font-weight:650}
+:root[data-theme="light"] .btn.pri{color:#fff}
+.btn.def{border-color:var(--def);color:var(--def)}
+.btn.fire{border-color:var(--fire);color:var(--fire)}
+/* variant tabs */
+.tabs{display:inline-flex;border:1px solid var(--line);border-radius:99px;padding:4px;background:var(--panel);margin-bottom:14px}
+.tabs button{border:0;background:transparent;border-radius:99px;padding:7px 14px;cursor:pointer;font-size:13.5px;color:var(--muted)}
+.tabs button.on{background:var(--panel2);color:var(--text);box-shadow:inset 0 0 0 1px var(--line)}
+.tabs button.on.def{color:var(--def)}.tabs button.on.fire{color:var(--fire)}
+table.spec{width:100%;border-collapse:collapse;font-size:14px}
+table.spec th,table.spec td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+table.spec th{font:600 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+table.spec td:first-child{color:var(--muted);width:34%}
+table.spec td.v{font-family:var(--mono);color:var(--text)}
+.scroll-x{overflow-x:auto}
+/* readiness bars */
+.bar{height:8px;background:var(--bg2);border-radius:99px;overflow:hidden;border:1px solid var(--line);margin-top:6px}
+.bar i{display:block;height:100%;background:var(--accent);border-radius:99px}
+.bar i.ok{background:var(--ok)}.bar i.warn{background:var(--warn)}.bar i.bad{background:var(--bad)}
+.rrow{display:grid;grid-template-columns:1fr 60px;gap:10px;align-items:center;padding:7px 0;border-bottom:1px dashed var(--line);font-size:14px}
+.rrow .pct{font:600 12px var(--mono);text-align:right;color:var(--muted)}
+/* timeline */
+.tl{position:relative;margin-top:8px}
+.tl .ph{display:grid;grid-template-columns:120px 1fr;gap:14px;padding:12px 0;border-bottom:1px solid var(--line)}
+@media (max-width:600px){.tl .ph{grid-template-columns:1fr}}
+.tl .when{font:700 12px var(--mono);color:var(--accent)}
+.redact{background:repeating-linear-gradient(45deg,var(--bg2),var(--bg2) 6px,var(--panel2) 6px,var(--panel2) 12px);border:1px dashed var(--dim);border-radius:6px;padding:2px 8px;font:600 11.5px var(--mono);color:var(--dim)}
+.help{position:fixed;right:16px;bottom:34px;z-index:41}
+.kbd{font:600 11px var(--mono);border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:2px 6px;background:var(--panel)}
+.toast{position:fixed;left:50%;top:40px;transform:translateX(-50%);background:var(--panel);border:1px solid var(--line);padding:8px 14px;border-radius:10px;font-size:13px;z-index:70;opacity:0;transition:opacity .25s;pointer-events:none}
+.toast.show{opacity:1}
+@media (max-width:600px){.nav .hide-sm{display:none}.help{display:none}}
+@media print{
+  body{overflow:visible}.nav,.progress,.help,.overview{display:none!important}
+  .deck{position:static}.slide{position:relative;opacity:1;visibility:visible;transform:none;page-break-after:always;overflow:visible;inset:auto}
+}
+</style>
+</head>
+<body>
+<div class="banner top" id="bannerTop">UNCLASSIFIED — CONCEPT BRIEF — ILLUSTRATIVE FIGURES</div>
+<div class="progress" id="progress"></div>
+
+<main class="deck" id="deck">
+
+<!-- 1 TITLE -->
+<section class="slide" data-title="Title" data-sum="RayeedAI: a voice-commanded autonomous drone platform with Defense and Firefighting variants.">
+<div class="inner hero">
+  <div>
+    <div class="kicker">Mission brief · Dual-use autonomous UAS</div>
+    <h1>RayeedAI<br><span style="color:var(--accent)">One AI flight brain.</span><br>Two missions.</h1>
+    <p class="lead">A voice-commanded autonomous drone. Operators give spoken commands in plain Bangla, and the drone carries them out through a safety-checked autonomy stack. One shared platform is configured either as a <b style="color:var(--def)">Defense</b> variant (ISR plus a human-controlled payload) or a <b style="color:var(--fire)">Firefighting</b> variant (thermal detection plus extinguisher delivery).</p>
+    <div style="margin-top:14px">
+      <span class="tag">Gemini Live voice</span><span class="tag">ArduPilot / MAVLink</span><span class="tag">OAK-D Lite edge AI</span><span class="tag">VIO + SLAM</span><span class="tag">Human-in-the-loop</span>
+    </div>
+    <div class="summary"><b>Section summary</b><p>This brief covers what is already built in the codebase, how it works, how it keeps itself safe, and how the same core becomes an Army platform or a fire-service platform. Hardware specs are illustrative estimates.</p></div>
+  </div>
+  <svg viewBox="0 0 400 320" role="img" aria-label="Drone illustration">
+    <defs>
+      <radialGradient id="glow" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="var(--accent)" stop-opacity=".35"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></radialGradient>
+    </defs>
+    <circle cx="200" cy="160" r="150" fill="url(#glow)"/>
+    <g stroke="var(--line)" stroke-width="1" fill="none" opacity=".8">
+      <circle cx="200" cy="160" r="120" stroke-dasharray="3 6"/><circle cx="200" cy="160" r="80" stroke-dasharray="2 5"/>
+    </g>
+    <g stroke="var(--muted)" stroke-width="6" stroke-linecap="round">
+      <line x1="200" y1="160" x2="110" y2="95"/><line x1="200" y1="160" x2="290" y2="95"/>
+      <line x1="200" y1="160" x2="110" y2="225"/><line x1="200" y1="160" x2="290" y2="225"/>
+      <line x1="200" y1="160" x2="75" y2="160"/><line x1="200" y1="160" x2="325" y2="160"/>
+    </g>
+    <g fill="none" stroke="var(--accent)" stroke-width="2.5">
+      <ellipse cx="110" cy="95" rx="34" ry="8"><animateTransform attributeName="transform" type="rotate" from="0 110 95" to="360 110 95" dur="1.2s" repeatCount="indefinite"/></ellipse>
+      <ellipse cx="290" cy="95" rx="34" ry="8"><animateTransform attributeName="transform" type="rotate" from="360 290 95" to="0 290 95" dur="1.2s" repeatCount="indefinite"/></ellipse>
+      <ellipse cx="110" cy="225" rx="34" ry="8"><animateTransform attributeName="transform" type="rotate" from="360 110 225" to="0 110 225" dur="1.2s" repeatCount="indefinite"/></ellipse>
+      <ellipse cx="290" cy="225" rx="34" ry="8"><animateTransform attributeName="transform" type="rotate" from="0 290 225" to="360 290 225" dur="1.2s" repeatCount="indefinite"/></ellipse>
+      <ellipse cx="75" cy="160" rx="30" ry="7"><animateTransform attributeName="transform" type="rotate" from="0 75 160" to="360 75 160" dur="1.2s" repeatCount="indefinite"/></ellipse>
+      <ellipse cx="325" cy="160" rx="30" ry="7"><animateTransform attributeName="transform" type="rotate" from="360 325 160" to="0 325 160" dur="1.2s" repeatCount="indefinite"/></ellipse>
+    </g>
+    <rect x="165" y="135" width="70" height="50" rx="12" fill="var(--panel2)" stroke="var(--accent)" stroke-width="2"/>
+    <circle cx="200" cy="160" r="9" fill="var(--accent2)"/>
+    <rect x="172" y="190" width="56" height="20" rx="5" fill="var(--panel)" stroke="var(--fire)" stroke-width="1.5"/>
+    <text x="200" y="204" text-anchor="middle" font-family="monospace" font-size="9" fill="var(--muted)">PAYLOAD</text>
+  </svg>
+</div>
+</section>
+
+<!-- 2 EXEC SUMMARY -->
+<section class="slide" data-title="Executive summary" data-sum="What it is, what works today, and the two mission variants.">
+<div class="inner">
+  <div class="kicker">01 · Executive summary</div>
+  <h2>A software-defined drone that understands spoken orders</h2>
+  <p class="lead">RayeedAI turns a commercial ArduPilot airframe into an assistant you talk to. The AI handles the routine flying. A rule-based safety core can overrule the AI at any time. For any action that delivers a payload, a human makes the final decision.</p>
+  <div class="grid g4" style="margin-top:16px">
+    <div class="card acc"><div class="stat">21</div><div class="statlabel">Flight &amp; vision tools in the registry, each with permission level and allowed states</div></div>
+    <div class="card acc"><div class="stat">9</div><div class="statlabel">Mission states in a strict transition graph (IDLE → … → FAILSAFE)</div></div>
+    <div class="card acc"><div class="stat">7</div><div class="statlabel">Safety-gated steps every command passes through before the motors move</div></div>
+    <div class="card acc"><div class="stat">235</div><div class="statlabel">Automated tests: state machine, safety, failures, vision, localization, oracle</div></div>
+  </div>
+  <div class="grid g2" style="margin-top:14px">
+    <div class="card def"><h3 style="color:var(--def)">Defense variant</h3><ul><li>ISR: patrol, overwatch, reconnaissance, target marking</li><li>Modular payload bay, including mission payloads</li><li>Release requires positive operator and commander authorization; the AI cannot fire</li></ul></div>
+    <div class="card fire"><h3 style="color:var(--fire)">Firefighting variant</h3><ul><li>Thermal hotspot detection, high-rise and wildfire spotting</li><li>Extinguisher-ball or dry-chemical canister delivery</li><li>Holds a standoff distance from heat and smoke using stereo depth and SLAM</li></ul></div>
+  </div>
+  <div class="summary"><b>Section summary</b><p>The autonomy software is already built and tested in simulation and on MAVLink/ArduPilot. The next step is to add mission payload modules on top of the existing safety pipeline, with the same gating and the same human authorization.</p></div>
+</div>
+</section>
+
+<!-- 3 PROBLEM -->
+<section class="slide" data-title="The problem" data-sum="Why both soldiers and firefighters need a drone they can talk to.">
+<div class="inner">
+  <div class="kicker">02 · The operational problem</div>
+  <h2>Drones help in a crisis, but flying them takes the operator's hands and eyes</h2>
+  <div class="grid g3" style="margin-top:12px">
+    <div class="card acc"><h3>Cognitive overload</h3><p>A section commander or fire officer can't run a joystick, a map and a radio at the same time. Today's UAS need a dedicated, trained pilot.</p></div>
+    <div class="card acc"><h3>Language barrier</h3><p>Ground-control software is English-first and menu-driven. Front-line users in Bangladesh think and speak in Bangla, especially under stress.</p></div>
+    <div class="card acc"><h3>GPS-denied, cluttered spaces</h3><p>Jamming, urban canyons, smoke and indoor fires break GPS-only autonomy. The drone has to see and map its surroundings on its own.</p></div>
+  </div>
+  <div class="grid g2" style="margin-top:14px">
+    <div class="card def"><h3 style="color:var(--def)">Army need</h3><p>Persistent eyes over a perimeter or convoy, fast reconnaissance of a compound, and a precise, accountable payload capability that keeps soldiers out of direct exposure.</p></div>
+    <div class="card fire"><h3 style="color:var(--fire)">Fire-service need</h3><p>Reach upper floors that ladders can't reach in time, find the seat of the fire through smoke, and knock down early-stage fires before crews arrive.</p></div>
+  </div>
+  <div class="summary"><b>Section summary</b><p>Both users need the same thing: a drone they can direct by voice, that flies itself safely in difficult environments, and that delivers a payload only when a human decides it should.</p></div>
+</div>
+</section>
+
+<!-- 4 ARCHITECTURE -->
+<section class="slide" data-title="System architecture" data-sum="Interactive: two command layers on a five-layer pipeline.">
+<div class="inner">
+  <div class="kicker">03 · Architecture (interactive)</div>
+  <h2>Two independent command layers</h2>
+  <p>Click any block to see what it does and where it lives in the code.</p>
+  <div class="grid g2" style="margin-top:8px;align-items:start">
+    <div class="arch" id="arch">
+      <div class="layerlbl">Layer 1 — Mission (seconds, LLM-driven)</div>
+      <div class="archrow">
+        <button class="node" data-k="audio"><span class="nt">Voice I/O</span><span class="ns">Mic → PCM, speaker</span></button>
+        <button class="node" data-k="llm"><span class="nt">Gemini Live</span><span class="ns">Bangla NLU + tools</span></button>
+        <button class="node" data-k="planner"><span class="nt">Planner</span><span class="ns">6 decisions, can override</span></button>
+      </div>
+      <div class="arrow">▼</div>
+      <div class="archrow">
+        <button class="node" data-k="dispatch"><span class="nt">Tool Dispatcher</span><span class="ns">7-step pipeline</span></button>
+        <button class="node" data-k="safety"><span class="nt">Safety Policy</span><span class="ns">Hard gates</span></button>
+        <button class="node" data-k="sm"><span class="nt">State Machine</span><span class="ns">Legal transitions</span></button>
+      </div>
+      <div class="arrow">▼</div>
+      <div class="archrow">
+        <button class="node" data-k="adapter"><span class="nt">Drone Adapter</span><span class="ns">Sim ⇄ MAVLink</span></button>
+        <button class="node" data-k="fc"><span class="nt">Flight Controller</span><span class="ns">ArduPilot GUIDED</span></button>
+      </div>
+      <div class="layerlbl">Layer 2 — Reflex (20 Hz, no LLM)</div>
+      <div class="archrow">
+        <button class="node l2" data-k="dronet"><span class="nt">DroNet Avoidance</span><span class="ns">CNN on OAK-D</span></button>
+        <button class="node l2" data-k="slam"><span class="nt">VIO + SLAM</span><span class="ns">6-DOF pose + 3D map</span></button>
+        <button class="node l2" data-k="oracle"><span class="nt">Thinking Oracle</span><span class="ns">Local reasoning check</span></button>
+      </div>
+    </div>
+    <div class="card detail" id="archDetail"></div>
+  </div>
+  <div class="summary"><b>Section summary</b><p>The LLM chooses <i>what</i> to do, every few seconds. A separate reflex layer handles <i>staying alive</i> at 20 Hz without the LLM. In ArduPilot GUIDED mode a velocity override lasts one cycle, so the two layers can run together without conflict. A crash in the voice session cannot take down telemetry or avoidance.</p></div>
+</div>
+</section>
+
+<!-- 5 VOICE PIPELINE -->
+<section class="slide" data-title="Voice-to-flight pipeline" data-sum="Interactive: watch a spoken command pass the 7-step dispatcher.">
+<div class="inner">
+  <div class="kicker">04 · From speech to motors (interactive)</div>
+  <h2>Every command passes the same 7 checkpoints</h2>
+  <p>Pick a command (spoken in Bangla, shown here in translation) and watch the dispatcher process it.</p>
+  <div class="grid g2" style="margin-top:6px;align-items:start">
+    <div>
+      <div class="cmds" id="cmds"></div>
+      <div class="chk"><input type="checkbox" id="pLowBatt"><label for="pLowBatt">Inject fault: battery at 12%</label></div>
+      <div class="chk"><input type="checkbox" id="pObst"><label for="pObst">Inject fault: DroNet sees obstacle (p=0.82)</label></div>
+    </div>
+    <pre class="json" id="pJson">// Select a command to run it</pre>
+  </div>
+  <div class="steps" id="steps"></div>
+  <div class="summary"><b>Section summary</b><p>The AI cannot move the drone directly. It can only <i>request</i> tools. Each request is checked against the registry, the safety gates and the state machine, then executed with a 10-second timeout, and the result comes back as a standard <span class="mono">ToolResponse</span> that the planner can overrule.</p></div>
+</div>
+</section>
+
+<!-- 6 SAFETY SIM -->
+<section class="slide" data-title="Safety gate simulator" data-sum="Interactive: adjust live conditions and see what the safety policy decides.">
+<div class="inner">
+  <div class="kicker">05 · Safety core (interactive)</div>
+  <h2>The safety policy can overrule the AI</h2>
+  <div class="sim" style="margin-top:8px">
+    <div class="card">
+      <div class="ctl"><label>Requested tool</label>
+        <select id="sTool">
+          <option value="goto_position">goto_position (fly to point)</option>
+          <option value="set_speed">set_speed</option>
+          <option value="takeoff">takeoff</option>
+          <option value="payload_release">payload_release (roadmap, critical)</option>
+          <option value="get_telemetry">get_telemetry (read-only)</option>
+        </select></div>
+      <div class="ctl"><label>Battery <b id="vBatt">78%</b></label><input type="range" id="sBatt" min="0" max="100" value="78"></div>
+      <div class="ctl"><label>Telemetry age <b id="vTel">1.0 s</b></label><input type="range" id="sTel" min="0" max="150" value="10"></div>
+      <div class="ctl"><label>Target altitude <b id="vAlt">40 m</b></label><input type="range" id="sAlt" min="0" max="160" value="40"></div>
+      <div class="ctl"><label>Target speed <b id="vSpd">6 m/s</b></label><input type="range" id="sSpd" min="0" max="25" value="6"></div>
+      <div class="ctl"><label>DroNet collision probability <b id="vCol">0.10</b></label><input type="range" id="sCol" min="0" max="100" value="10"></div>
+      <div class="ctl"><label>SLAM nearest obstacle <b id="vProx">6.0 m</b></label><input type="range" id="sProx" min="0" max="100" value="60"></div>
+      <div class="ctl"><label>Consecutive retries <b id="vRet">0</b></label><input type="range" id="sRet" min="0" max="5" value="0"></div>
+      <div class="chk"><input type="checkbox" id="sAuth"><label for="sAuth">Human release authorization given (payload only)</label></div>
+    </div>
+    <div>
+      <div class="verdict ok" id="verdict"><div class="vd">ALLOW</div><div class="vr">All gates nominal</div></div>
+      <ul class="gates" id="gates"></ul>
+      <p class="note">Thresholds are the real values from <span class="mono">config.py</span>: battery 15% critical / 25% low, telemetry 5 s stale / 10 s emergency, ceiling 120 m, 15 m/s, collision 0.7, SLAM proximity 1.5 m, 3 retries. The payload gate is a proposed extension.</p>
+    </div>
+  </div>
+  <div class="summary"><b>Section summary</b><p>The safety checks are deterministic code, not AI. If the AI asks to fly into an obstacle, climb past the ceiling, or keep going on a dying battery, the request is blocked. Repeated failures escalate to abort or failsafe. The same gate structure carries over to payload release for both variants.</p></div>
+</div>
+</section>
+
+<!-- 7 STATE MACHINE -->
+<section class="slide" data-title="Mission state machine" data-sum="Interactive: click a state to see legal next states and permitted tools.">
+<div class="inner">
+  <div class="kicker">06 · Mission state machine (interactive)</div>
+  <h2>The drone can only be in one legal state at a time</h2>
+  <div class="sm" style="margin-top:8px">
+    <svg viewBox="0 0 640 380" id="smSvg" role="img" aria-label="State machine diagram">
+      <defs>
+        <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--line)"/></marker>
+        <marker id="arrHot" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--ok)"/></marker>
+      </defs>
+      <g id="smEdges"></g><g id="smNodes"></g>
+    </svg>
+    <div class="card" id="smDetail"></div>
+  </div>
+  <div class="summary"><b>Section summary</b><p>Only the state machine can change the mission state. Every tool declares the states it is valid in: you can't take off unless armed, and you can't fly to a point unless airborne. <span class="mono">FAILSAFE</span> is reachable from any state, at any time.</p></div>
+</div>
+</section>
+
+<!-- 8 PERCEPTION -->
+<section class="slide" data-title="Perception & autonomy" data-sum="Edge AI on the OAK-D Lite: avoidance, mapping, detection, local reasoning.">
+<div class="inner">
+  <div class="kicker">07 · Perception &amp; onboard autonomy</div>
+  <h2>Sees, maps and reasons on the edge</h2>
+  <div class="grid g4" style="margin-top:10px">
+    <div class="card acc"><span class="tag ok">Built</span><h3>DroNet avoidance</h3><p>PULP-DroNet v3 CNN on the Myriad X VPU at ~20 Hz. Outputs collision probability and steering, and sends velocity corrections directly over MAVLink.</p></div>
+    <div class="card acc"><span class="tag ok">Built</span><h3>VIO + SLAM</h3><p>RTAB-Map visual-inertial odometry plus SLAM gives a 6-DOF pose without GPS, a 5 cm 3D occupancy grid, and relocalization into saved maps.</p></div>
+    <div class="card acc"><span class="tag ok">Built</span><h3>Object detection</h3><p>On-device YOLOv6n with stereo depth returns objects with 3D coordinates (mm), converted to NED/GPS through the localizer.</p></div>
+    <div class="card acc"><span class="tag ok">Built</span><h3>Thinking oracle</h3><p>A small local model (qwen3 0.6B via Ollama) reviews each critical step. If it fails, the system falls back to deterministic rules, so it works with no cloud link.</p></div>
+  </div>
+  <div class="grid g2" style="margin-top:14px">
+    <div class="card def"><h3 style="color:var(--def)">What this means for Defense</h3><p>Navigation still works when GPS is jammed or spoofed (VIO pose plus a saved map). Detections come with geo-coordinates for reporting, and the drone avoids obstacles on its own in urban terrain and under tree cover.</p></div>
+    <div class="card fire"><h3 style="color:var(--fire)">What this means for Fire</h3><p>Indoor and stairwell flight without GPS, and a 3D map of the building to brief crews. Thermal fusion is on the roadmap because stereo depth weakens in dense smoke.</p></div>
+  </div>
+  <div class="summary"><b>Section summary</b><p>All perception runs on a palm-sized camera with its own AI chip, with no ground server needed. The drone keeps flying and avoiding obstacles even if the voice link or the cloud LLM drops.</p></div>
+</div>
+</section>
+
+<!-- 9 DEFENSE MISSIONS -->
+<section class="slide" data-title="Defense: mission set" data-sum="Army variant missions: ISR, perimeter, convoy, recon, marking, payload.">
+<div class="inner">
+  <div class="kicker def">08 · Variant A — Defense</div>
+  <h2>Army configuration: a squad-level aerial asset</h2>
+  <p class="lead">The same flight brain with a ruggedized airframe, an EO/IR gimbal and a modular payload bay. The commander talks to it like a radio operator.</p>
+  <div class="grid g3" style="margin-top:12px">
+    <div class="card def"><h3>ISR &amp; overwatch</h3><p>"Hold 80 m above checkpoint 2 and report movement." Uses <span class="mono">goto_position</span> → <span class="mono">HOVER</span> → <span class="mono">vision_detect_objects</span> with geo-tagged detections.</p></div>
+    <div class="card def"><h3>Perimeter patrol</h3><p>Waypoint loops around a base or forward post, with automatic return-to-launch on low battery or link loss (the existing <span class="mono">RTL</span> and failsafe workflows).</p></div>
+    <div class="card def"><h3>Convoy route scouting</h3><p>Flies ahead of a convoy, flags obstructions and possible ambush points, and reports distance and bearing (<span class="mono">get_distance_to_str</span>).</p></div>
+    <div class="card def"><h3>Building &amp; compound recon</h3><p>GPS-denied entry using VIO+SLAM, producing a 3D map of rooms and corridors before troops enter.</p></div>
+    <div class="card def"><h3>Target marking &amp; reporting</h3><p>Locates and geo-marks a point of interest for a human-directed fires or command chain. The drone reports; people decide.</p></div>
+    <div class="card def"><h3>Mission payload</h3><p>A modular bay for supply drops, smoke and marker canisters, or an approved mission payload, released only through the authorization chain on the next slide.</p></div>
+  </div>
+  <div class="summary"><b>Section summary</b><p>Most of the Army value is in <b>seeing and reporting</b>, and the software can already do that. The payload capability adds a module on top of the existing pipeline, under strict human authority.</p></div>
+</div>
+</section>
+
+<!-- 10 DEFENSE AUTH CHAIN -->
+<section class="slide" data-title="Defense: payload authorization" data-sum="Interactive: the human-in-the-loop chain for any payload release.">
+<div class="inner">
+  <div class="kicker def">09 · Variant A — Payload control (interactive)</div>
+  <h2>The AI assists. A human decides. A separate hardware lock enforces it.</h2>
+  <p>Step through the release chain. Human steps cannot be skipped, and the AI has no tool that can perform them.</p>
+  <div class="chain" id="chainDef"></div>
+  <div class="card chaindetail" id="chainDefDetail"></div>
+  <div class="btnrow"><button class="btn pri" id="defNext">Advance chain ▶</button><button class="btn" id="defAbort">Abort / safe payload</button><button class="btn" id="defReset">Reset</button></div>
+  <div class="grid g3" style="margin-top:14px">
+    <div class="card def"><h3>Design rules</h3><ul><li><span class="mono">payload_*</span> tools are permission level <span class="mono">critical</span></li><li>The voice LLM can't arm or release a payload</li><li>Authorization expires after a set time window</li></ul></div>
+    <div class="card def"><h3>Physical safety</h3><ul><li>A separate hardware master-arm, independent of the AI computer</li><li>Payload goes safe automatically on FAILSAFE, RTL or link loss</li><li>Geofence and no-release zones</li></ul></div>
+    <div class="card def"><h3>Accountability</h3><ul><li>Every request, authorization and actor is logged with a timestamp</li><li>Telemetry and video kept for after-action review</li><li>Aligned with IHL and Rules of Engagement</li></ul></div>
+  </div>
+  <div class="summary"><b>Section summary</b><p>The Defense variant uses <b>meaningful human control</b>. AI detection and tracking cut operator workload, but there is no autonomous engagement mode. Release needs two human decisions and a separate hardware interlock, and every step is logged. Payload integration specifics are <span class="redact">[RESTRICTED — handled outside this brief]</span>.</p></div>
+</div>
+</section>
+
+<!-- 11 FIRE MISSIONS -->
+<section class="slide" data-title="Firefighting: mission set" data-sum="Fire variant missions: high-rise, wildfire, industrial, search, mapping.">
+<div class="inner">
+  <div class="kicker fire">10 · Variant B — Firefighting</div>
+  <h2>Fire-service configuration: first on scene, from the air</h2>
+  <p class="lead">A heat-tolerant airframe with a thermal camera and an extinguisher payload. The station officer dispatches it by voice while crews are still on the way.</p>
+  <div class="grid g3" style="margin-top:12px">
+    <div class="card fire"><h3>High-rise fire attack</h3><p>Flies to the reported floor, finds the hottest window by thermal imaging, holds a standoff distance, and delivers extinguisher balls through the opening.</p></div>
+    <div class="card fire"><h3>Early knock-down</h3><p>Drops dry-chemical or AFO extinguisher units on early-stage fires in markets, garment factories and warehouses before they spread.</p></div>
+    <div class="card fire"><h3>Wildfire &amp; hill-forest spotting</h3><p>Patrols for hotspots, geo-tags fire fronts, and reports spread direction to incident command.</p></div>
+    <div class="card fire"><h3>Interior scouting</h3><p>Smoke-filled interiors without GPS: SLAM builds a map of stairwells and rooms, and YOLO flags people for rescue teams.</p></div>
+    <div class="card fire"><h3>Hazmat &amp; industrial</h3><p>Inspects chemical, gas or electrical fires from a safe distance before crews go in (existing <span class="mono">inspection</span> workflow).</p></div>
+    <div class="card fire"><h3>Incident command view</h3><p>A live overhead view with position and telemetry for the commander, plus automatic return-to-launch on low battery.</p></div>
+  </div>
+  <div class="summary"><b>Section summary</b><p>The firefighting variant reuses the same voice, safety and navigation stack. What's new is thermal targeting and an extinguisher payload that flies straight into the gaps ladders and hoses can't reach quickly.</p></div>
+</div>
+</section>
+
+<!-- 12 FIRE WORKFLOW -->
+<section class="slide" data-title="Firefighting: suppression workflow" data-sum="Interactive: the hotspot-to-extinguisher-drop workflow.">
+<div class="inner">
+  <div class="kicker fire">11 · Variant B — Suppression workflow (interactive)</div>
+  <h2>From "fire on the 9th floor" to extinguisher delivered</h2>
+  <p>Step through a suppression sortie. The operator confirms every drop, which is faster than the Defense chain but still a human decision.</p>
+  <div class="chain" id="chainFire"></div>
+  <div class="card chaindetail" id="chainFireDetail"></div>
+  <div class="btnrow"><button class="btn pri" id="fireNext">Advance workflow ▶</button><button class="btn" id="fireReset">Reset</button></div>
+  <div class="grid g3" style="margin-top:14px">
+    <div class="card fire"><h3>Extinguisher payloads</h3><ul><li>AFO-type self-activating balls (~1.3 kg each)</li><li>Dry-chemical canister with a burst charge</li><li>Option: tethered hose for sustained spray</li></ul></div>
+    <div class="card fire"><h3>Heat &amp; smoke safety</h3><ul><li>Standoff distance enforced by SLAM proximity (≥1.5 m)</li><li>Thermal ceiling gate on approach (roadmap)</li><li>Automatic RTL if updrafts push altitude or speed past the limits</li></ul></div>
+    <div class="card fire"><h3>Drop accuracy</h3><ul><li>Hover hold from VIO pose plus GPS</li><li>Release point accounts for height and drift</li><li>Re-check with thermal after each drop</li></ul></div>
+  </div>
+  <div class="summary"><b>Section summary</b><p>A fire sortie is a short chain: detect, approach, aim, confirm, drop, reassess. The safety core keeps the drone out of heat and away from walls, and a single operator confirmation releases each extinguisher.</p></div>
+</div>
+</section>
+
+<!-- 13 SPECS -->
+<section class="slide" data-title="Variant specifications" data-sum="Interactive: compare illustrative specs for Defense vs Fire builds.">
+<div class="inner">
+  <div class="kicker">12 · Platform specifications (interactive)</div>
+  <h2>One core, two builds</h2>
+  <div class="tabs" id="specTabs"><button data-v="both" class="on">Side by side</button><button data-v="def" class="def">Defense</button><button data-v="fire" class="fire">Firefighting</button></div>
+  <div class="card scroll-x"><table class="spec" id="specTable"></table></div>
+  <p class="note">⚠ Illustrative estimates for a heavy-lift hexacopter class airframe. Not measured values. Confirm against the selected airframe and payload vendor data before procurement. Software limits (120 m ceiling, 15 m/s, 15% battery failsafe) are the actual values in <span class="mono">config.py</span>.</p>
+  <div class="summary"><b>Section summary</b><p>Both variants share the same compute (Raspberry Pi 5 class companion computer + OAK-D Lite), the same autopilot and the same software. They differ only in airframe hardening, sensors and payload, so training, spares and software updates are common.</p></div>
+</div>
+</section>
+
+<!-- 14 READINESS -->
+<section class="slide" data-title="Technology readiness" data-sum="Honest status: what is built and tested versus what is planned.">
+<div class="inner">
+  <div class="kicker">13 · Readiness — built vs. planned</div>
+  <h2>Where the project stands today</h2>
+  <div class="grid g2" style="margin-top:10px;align-items:start">
+    <div class="card acc">
+      <h3>Software core</h3>
+      <div class="rrow"><div>Voice command (Gemini Live, Bangla)<div class="bar"><i class="ok" style="width:85%"></i></div></div><div class="pct">85%</div></div>
+      <div class="rrow"><div>Tool dispatcher + safety policy + state machine<div class="bar"><i class="ok" style="width:90%"></i></div></div><div class="pct">90%</div></div>
+      <div class="rrow"><div>Simulator backend<div class="bar"><i class="ok" style="width:95%"></i></div></div><div class="pct">95%</div></div>
+      <div class="rrow"><div>MAVLink/ArduPilot adapter (SITL + RPi 5 logs)<div class="bar"><i class="ok" style="width:75%"></i></div></div><div class="pct">75%</div></div>
+      <div class="rrow"><div>DroNet avoidance layer<div class="bar"><i class="warn" style="width:65%"></i></div></div><div class="pct">65%</div></div>
+      <div class="rrow"><div>VIO + SLAM runner &amp; proximity gate<div class="bar"><i class="warn" style="width:60%"></i></div></div><div class="pct">60%</div></div>
+      <div class="rrow"><div>Thinking oracle (local reasoning)<div class="bar"><i class="warn" style="width:60%"></i></div></div><div class="pct">60%</div></div>
+    </div>
+    <div class="card acc">
+      <h3>Mission modules</h3>
+      <div class="rrow"><div>ISR workflows (navigate, inspect, RTL)<div class="bar"><i class="warn" style="width:55%"></i></div></div><div class="pct">55%</div></div>
+      <div class="rrow"><div>Thermal camera fusion<div class="bar"><i class="bad" style="width:10%"></i></div></div><div class="pct">10%</div></div>
+      <div class="rrow"><div>Payload tools + authorization chain<div class="bar"><i class="bad" style="width:10%"></i></div></div><div class="pct">10%</div></div>
+      <div class="rrow"><div>Hardware master-arm interlock<div class="bar"><i class="bad" style="width:5%"></i></div></div><div class="pct">5%</div></div>
+      <div class="rrow"><div>Ruggedized / heat-shielded airframes<div class="bar"><i class="bad" style="width:5%"></i></div></div><div class="pct">5%</div></div>
+      <div class="rrow"><div>Field trials &amp; certification<div class="bar"><i class="bad" style="width:0%"></i></div></div><div class="pct">0%</div></div>
+      <p class="note">Percentages are a qualitative team estimate of completeness, not a formal TRL audit.</p>
+    </div>
+  </div>
+  <div class="summary"><b>Section summary</b><p>The hard part, a safe, voice-driven autonomy core with 235 passing tests, is largely built. Payload, thermal and airframe work remain. These are integration tasks on proven parts, not research.</p></div>
+</div>
+</section>
+
+<!-- 15 RISKS & COMPLIANCE -->
+<section class="slide" data-title="Risks, ethics & compliance" data-sum="Key risks and how the design handles them.">
+<div class="inner">
+  <div class="kicker">14 · Risk, ethics &amp; compliance</div>
+  <h2>Built to be trusted</h2>
+  <div class="card scroll-x" style="margin-top:10px">
+  <table class="spec">
+    <tr><th>Risk</th><th>Mitigation in design</th><th>Variant</th></tr>
+    <tr><td>LLM misunderstands or hallucinates a command</td><td>Registry plus state checks reject invalid tools, the planner can override, and critical actions need confirmation</td><td><span class="tag">Both</span></td></tr>
+    <tr><td>Cloud or voice link lost</td><td>Session tasks are isolated from background tasks, reflex avoidance keeps running, local oracle and rule fallback, failsafe at 10 s stale telemetry</td><td><span class="tag">Both</span></td></tr>
+    <tr><td>GPS jamming or spoofing</td><td>VIO pose becomes the primary source when fresh, SLAM relocalization into saved maps</td><td><span class="tag def">Defense</span></td></tr>
+    <tr><td>Unintended payload release</td><td>Two-person authorization, hardware master-arm, auto-safe on failsafe, full audit log</td><td><span class="tag def">Defense</span><span class="tag fire">Fire</span></td></tr>
+    <tr><td>Autonomous use of force</td><td>No autonomous engagement mode by design. A human makes every release decision, in line with IHL and DoD 3000.09-style policy</td><td><span class="tag def">Defense</span></td></tr>
+    <tr><td>Heat, smoke, updrafts</td><td>Standoff gate, altitude and speed hard limits, automatic RTL, thermal fusion on the roadmap</td><td><span class="tag fire">Fire</span></td></tr>
+    <tr><td>Airspace &amp; regulation</td><td>120 m ceiling enforced in code, geofencing, CAAB / local authority clearance required</td><td><span class="tag">Both</span></td></tr>
+    <tr><td>Data security</td><td>Option to run a local LLM instead of the cloud API, encrypted links <span class="redact">[RESTRICTED — handled outside this brief]</span></td><td><span class="tag def">Defense</span></td></tr>
+  </table>
+  </div>
+  <div class="summary"><b>Section summary</b><p>Every major risk maps to a concrete control, and most of those controls already exist in code. The design rule that matters most for the Army variant: the drone can find, track and report, but only people decide to release a payload.</p></div>
+</div>
+</section>
+
+<!-- 16 ROADMAP -->
+<section class="slide" data-title="Roadmap" data-sum="Phased plan from software core to field trials for both variants.">
+<div class="inner">
+  <div class="kicker">15 · Roadmap</div>
+  <h2>From lab to field</h2>
+  <div class="tl">
+    <div class="ph"><div class="when">PHASE 1<br><span style="color:var(--ok)">done</span></div><div><h3>Autonomy core</h3><p>Voice → tools → safety → state machine, simulator and MAVLink adapters, DroNet and VIO/SLAM integration, 235 tests.</p></div></div>
+    <div class="ph"><div class="when">PHASE 2<br>0–3 months</div><div><h3>Flight validation</h3><p>SITL-to-real flights on the RPi 5 build, a waypoint ISR demo, GPS-denied VIO hover tests, and tuning of the avoidance gains.</p></div></div>
+    <div class="ph"><div class="when">PHASE 3<br>3–6 months</div><div><h3>Payload &amp; thermal modules</h3><p><span class="mono">payload_*</span> tools with the authorization chain and audit log, a hardware master-arm, thermal hotspot detection, and extinguisher drop trials on controlled fires.</p></div></div>
+    <div class="ph"><div class="when">PHASE 4<br>6–12 months</div><div><h3>Variant prototypes</h3><p><b style="color:var(--def)">Defense:</b> ruggedized airframe, EO/IR gimbal, secure link, trials with an Army unit. <b style="color:var(--fire)">Fire:</b> heat-shielded airframe, trials with the fire service.</p></div></div>
+    <div class="ph"><div class="when">PHASE 5<br>12+ months</div><div><h3>Certification &amp; production</h3><p>Regulatory approval, operator training syllabus in Bangla, and a small-batch production line.</p></div></div>
+  </div>
+  <div class="summary"><b>Section summary</b><p>The plan runs five phases over about 12 months. The core is finished. The next steps are real-flight validation, then payload and thermal modules, then variant-specific prototypes trialled with real end users.</p></div>
+</div>
+</section>
+
+<!-- 17 CLOSE -->
+<section class="slide" data-title="The ask" data-sum="What we need to move to field trials.">
+<div class="inner">
+  <div class="kicker">16 · Next steps</div>
+  <h2>What we're asking for</h2>
+  <div class="grid g3" style="margin-top:12px">
+    <div class="card acc"><h3>Partnership</h3><p>A sponsoring Army unit and a fire-service station to define requirements and host trials.</p></div>
+    <div class="card acc"><h3>Resources</h3><p>Funding for two prototype airframes per variant, thermal and EO/IR sensors, and test range access. Budget: <span class="redact">[to be filled by presenter]</span></p></div>
+    <div class="card acc"><h3>Approvals</h3><p>Airspace clearance for test flights and guidance on payload policy and handling requirements.</p></div>
+  </div>
+  <div class="card" style="margin-top:14px">
+    <h3>The one-line pitch</h3>
+    <p style="font-size:17px;color:var(--text)">A drone you command by voice in your own language. It flies itself safely, sees without GPS, and delivers a payload only when a human says so, configurable for the battlefield or the fireground.</p>
+  </div>
+  <div class="summary"><b>Overall summary</b><p>RayeedAI has a tested, safety-first autonomy core. The Defense variant adds ISR and a human-controlled payload. The Firefighting variant adds thermal targeting and extinguisher delivery. Both share one software stack, one training path and one supply chain.</p></div>
+</div>
+</section>
+
+</main>
+
+<nav class="nav" aria-label="Slide navigation">
+  <button id="bPrev" aria-label="Previous slide">◀</button>
+  <span class="count" id="count">1 / 17</span>
+  <button id="bNext" aria-label="Next slide">▶</button>
+  <button id="bOver" class="hide-sm" title="Overview (O)">Overview</button>
+  <button id="bTheme" class="hide-sm" title="Theme (T)">Theme</button>
+  <button id="bFull" class="hide-sm" title="Fullscreen (F)">Fullscreen</button>
+</nav>
+<div class="help note"><span class="kbd">←</span> <span class="kbd">→</span> navigate · <span class="kbd">O</span> overview · <span class="kbd">T</span> theme</div>
+<div class="overview" id="overview"><div class="inner"><div class="kicker">Overview — click a slide</div><h2>Mission brief contents</h2><div class="ogrid" id="ogrid"></div></div></div>
+<div class="toast" id="toast"></div>
+<div class="banner bottom">UNCLASSIFIED — CONCEPT BRIEF — ILLUSTRATIVE FIGURES</div>
+
+<script>
+(function(){
+"use strict";
+const $=s=>document.querySelector(s), $$=s=>Array.from(document.querySelectorAll(s));
+const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+
+/* ---------- theme ---------- */
+const root=document.documentElement;
+const savedTheme=store.get("rai-theme");
+if(savedTheme) root.setAttribute("data-theme",savedTheme);
+function toggleTheme(){const t=root.getAttribute("data-theme")==="light"?"dark":"light";root.setAttribute("data-theme",t);store.set("rai-theme",t);toast("Theme: "+t)}
+function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("show");clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove("show"),1200)}
+
+/* ---------- deck ---------- */
+const slides=$$(".slide"); let cur=0;
+function go(i){
+  i=Math.max(0,Math.min(slides.length-1,i));
+  slides.forEach((s,j)=>{s.classList.toggle("active",j===i);s.classList.toggle("prev",j<i)});
+  cur=i; $("#count").textContent=(i+1)+" / "+slides.length;
+  $("#progress").style.width=((i+1)/slides.length*100)+"%";
+  if(location.hash!=="#"+(i+1)) history.replaceState(null,"","#"+(i+1));
+  slides[i].scrollTop=0;
+}
+$("#bPrev").onclick=()=>go(cur-1); $("#bNext").onclick=()=>go(cur+1);
+$("#bTheme").onclick=toggleTheme;
+$("#bFull").onclick=()=>{if(!document.fullscreenElement){document.documentElement.requestFullscreen&&document.documentElement.requestFullscreen()}else{document.exitFullscreen()}};
+const ov=$("#overview");
+function buildOverview(){
+  $("#ogrid").innerHTML=slides.map((s,i)=>`<button data-i="${i}" class="${i===cur?'cur':''}"><span class="on">${String(i+1).padStart(2,"0")}</span><span class="ot">${s.dataset.title}</span><span class="os">${s.dataset.sum}</span></button>`).join("");
+  $$("#ogrid button").forEach(b=>b.onclick=()=>{go(+b.dataset.i);ov.classList.remove("show")});
+}
+function toggleOverview(){if(ov.classList.contains("show")){ov.classList.remove("show")}else{buildOverview();ov.classList.add("show")}}
+$("#bOver").onclick=toggleOverview;
+document.addEventListener("keydown",e=>{
+  const tag=(e.target.tagName||"").toLowerCase();
+  if(tag==="input"||tag==="select"||tag==="textarea") return;
+  if(["ArrowRight","PageDown"," "].includes(e.key)){e.preventDefault();go(cur+1)}
+  else if(["ArrowLeft","PageUp"].includes(e.key)){e.preventDefault();go(cur-1)}
+  else if(e.key==="Home") go(0); else if(e.key==="End") go(slides.length-1);
+  else if(e.key==="o"||e.key==="O") toggleOverview();
+  else if(e.key==="t"||e.key==="T") toggleTheme();
+  else if(e.key==="f"||e.key==="F") $("#bFull").click();
+  else if(e.key==="Escape") ov.classList.remove("show");
+});
+let tx=null,ty=null;
+$("#deck").addEventListener("touchstart",e=>{tx=e.touches[0].clientX;ty=e.touches[0].clientY},{passive:true});
+$("#deck").addEventListener("touchend",e=>{if(tx===null)return;const dx=e.changedTouches[0].clientX-tx,dy=e.changedTouches[0].clientY-ty;if(Math.abs(dx)>60&&Math.abs(dx)>Math.abs(dy)*1.5){go(cur+(dx<0?1:-1))}tx=null},{passive:true});
+window.addEventListener("hashchange",()=>{const n=parseInt(location.hash.slice(1),10);if(n&&n-1!==cur)go(n-1)});
+go((parseInt(location.hash.slice(1),10)||1)-1);
+
+/* ---------- architecture ---------- */
+const ARCH={
+  audio:["Voice I/O","<code>audio/</code>","Captures mic audio as 16 kHz PCM and streams it to Gemini, then plays the 24 kHz reply. <code>turn_manager.py</code> mutes the mic while the AI is speaking so the drone doesn't hear itself."],
+  llm:["Gemini Live session","<code>app.py</code> · <code>tools/declarations.py</code>","A real-time voice model with a Bangla system prompt. It understands intent and emits function calls only. It never talks to the drone directly. A resilient receive loop reconnects on drops."],
+  planner:["Mission planner","<code>planner.py</code> · <code>workflows/</code>","Decides CONTINUE · WAIT · RETRY · REPLAN · ABORT · FAILSAFE after every tool result, and has authority to <b>override the LLM</b>. Its avoidance gate WAITs while DroNet steers and escalates to REPLAN if stuck for more than 10 s."],
+  dispatch:["Tool dispatcher","<code>tool_dispatcher.py</code>","A 7-step pipeline: registry → safety → execute (10 s timeout) → state transition → monitors → reset retries → <code>ToolResponse</code>. It enriches obstacle checks with live DroNet and SLAM data."],
+  safety:["Safety policy","<code>safety_policy.py</code>","Deterministic hard gates: battery, telemetry freshness, altitude ceiling, speed, retry count, DroNet collision probability and SLAM proximity. It holds direct references to the avoidance runners."],
+  sm:["State machine","<code>state_machine.py</code>","Nine mission states with an explicit legal-transition graph. <code>force_failsafe()</code> works from any state. Illegal transitions raise an error."],
+  adapter:["Drone adapter","<code>adapters/</code>","Swappable backend via <code>DRONE_BACKEND</code>: <code>SimAdapter</code> for in-memory simulation or <code>MAVLinkAdapter</code> for real hardware. The same 18 handlers in both, so switching needs no code changes."],
+  fc:["Flight controller","ArduPilot · GUIDED mode","Runs the low-level stabilization. Accepts position setpoints from Layer 1 and one-cycle velocity overrides from Layer 2, so the layers coexist without conflict."],
+  dronet:["DroNet avoidance runner","<code>vision/avoidance/dronet_runner.py</code>","PULP-DroNet v3 on the OAK-D Lite VPU at ~20 Hz. Publishes collision_prob, steering and depth, and sends <code>SET_POSITION_TARGET_LOCAL_NED</code> velocity commands itself. Non-fatal if the camera is absent."],
+  slam:["VIO + SLAM runner","<code>localization/vio_slam/</code>","RTAB-Map VIO and SLAM on the OAK-D. Pushes the 6-DOF pose into <code>PoseCache</code>, maintains a 5 cm 3D occupancy grid, and feeds a 1.5 m proximity safety gate. Can relocalize into a saved <code>map.db</code>."],
+  oracle:["Thinking oracle","<code>thinking_oracle.py</code>","A local qwen3 0.6B model that reasons about each high-value step and commits a JSON decision. Falls back to deterministic rules on any failure, at 20–400 ms per call."]
+};
+function showArch(k){
+  $$("#arch .node").forEach(n=>n.classList.toggle("sel",n.dataset.k===k));
+  const a=ARCH[k]; $("#archDetail").innerHTML=`<div class="kicker">${$(`#arch .node[data-k="${k}"]`).classList.contains("l2")?"Layer 2 · reflex":"Layer 1 · mission"}</div><h3>${a[0]}</h3><p style="margin:4px 0 10px">${a[1]}</p><p style="color:var(--text)">${a[2]}</p>`;
+}
+$$("#arch .node").forEach(n=>n.onclick=()=>showArch(n.dataset.k)); showArch("dispatch");
+
+/* ---------- pipeline ---------- */
+const CMDS=[
+  {say:"Take off to 15 metres",tool:"takeoff",args:{altitude:15},state:"armed",next:"takeoff",data:{status:"taking_off",target_altitude:15.0},move:true},
+  {say:"Fly to checkpoint two",tool:"goto_position",args:{lat:23.8103,lon:90.4125,alt:40},state:"hover",next:"enroute",data:{status:"moving",target:{lat:23.8103,lon:90.4125,alt:40}},move:true},
+  {say:"Any obstacles ahead?",tool:"vision_obstacle_check",args:{},state:"hover",next:"hover",data:{nearest_mm:3400,sectors:[5200,4100,3400,6000,7800],dronet:{collision_prob:0.12,depth_mm:3400,steering:-0.05,active:false}},move:false},
+  {say:"Battery status",tool:"get_battery",args:{},state:"enroute",next:"enroute",data:{voltage:22.4,current:18.2,level_percent:64.0},move:false},
+  {say:"Come back home",tool:"return_to_launch",args:{},state:"enroute",next:"rtl",data:{status:"returning_to_launch"},move:true},
+  {say:"Climb to 200 metres",tool:"takeoff",args:{altitude:200},state:"armed",next:"armed",data:null,move:true,fail:"altitude_ceiling",msg:"Altitude 200.0m exceeds ceiling 120.0m"},
+];
+const STEPS=["Registry check","Safety pre-check","Execute (≤10 s)","State transition","Update monitors","Reset retries","ToolResponse"];
+$("#cmds").innerHTML=CMDS.map((c,i)=>`<button class="cmd" data-i="${i}">"${c.say}"<span class="tr">→ ${c.tool}</span></button>`).join("");
+function renderSteps(stat){ $("#steps").innerHTML=STEPS.map((s,i)=>`<div class="step ${stat[i]?stat[i][0]:""}"><span class="sn">STEP ${i+1}</span><span class="st">${s}</span><span class="sr">${stat[i]?stat[i][1]:""}</span></div>`).join("") }
+renderSteps([]);
+let pTimer=null;
+function runCmd(i){
+  clearTimeout(pTimer);
+  $$("#cmds .cmd").forEach(b=>b.classList.toggle("sel",+b.dataset.i===i));
+  const c=CMDS[i], lowB=$("#pLowBatt").checked, obst=$("#pObst").checked;
+  let failAt=-1, err=null, decision="CONTINUE";
+  if(c.fail){failAt=1;err=c.msg;decision="REPLAN"}
+  else if(lowB&&c.move){failAt=1;err="Battery critical (12.0% < 15%)";decision="FAILSAFE"}
+  else if(obst&&(c.tool==="goto_position"||c.tool==="set_speed")){failAt=1;err="Avoidance active: collision_prob 0.82 ≥ 0.70";decision="WAIT"}
+  const reasons=[
+    "✓ '"+c.tool+"' registered · state '"+c.state+"' allowed",
+    failAt===1?"✗ "+err:"✓ battery, telemetry, limits, avoidance OK",
+    "→ adapter.execute() in thread",
+    c.next!==c.state?"→ "+c.state+" → "+c.next:"→ no change ("+c.state+")",
+    "→ battery / position monitors updated",
+    "→ retry counter = 0",
+    failAt>=0?"ok=false → planner: "+decision:"ok=true → planner: CONTINUE"
+  ];
+  const stat=[]; let k=0;
+  (function tick(){
+    if(k>=STEPS.length){finish();return}
+    stat[k]=["run","…"]; renderSteps(stat);
+    pTimer=setTimeout(()=>{
+      if(failAt>=0&&k===failAt){stat[k]=["fail",reasons[k]];for(let j=k+1;j<STEPS.length-1;j++)stat[j]=["skip","skipped"];stat[STEPS.length-1]=["fail",reasons[6]];renderSteps(stat);finish();return}
+      stat[k]=["pass",reasons[k]]; renderSteps(stat); k++; tick();
+    },380);
+  })();
+  function finish(){
+    const ok=failAt<0;
+    const resp={ok:ok,tool:c.tool,state:ok?c.next:c.state,data:ok?c.data:null,error:ok?null:err,next_action:ok?"continue":decision.toLowerCase(),wait:(!ok&&decision==="WAIT")?{seconds:2.0,reason:"avoidance_active"}:null,confidence:ok?0.97:0.0,timestamp:new Date().toISOString()};
+    $("#pJson").textContent="// spoken (Bangla): \""+c.say+"\"\n// LLM → "+c.tool+"("+JSON.stringify(c.args)+")\n\n"+JSON.stringify(resp,null,2);
+  }
+}
+$$("#cmds .cmd").forEach(b=>b.onclick=()=>runCmd(+b.dataset.i));
+
+/* ---------- safety simulator ---------- */
+const S={tool:$("#sTool"),batt:$("#sBatt"),tel:$("#sTel"),alt:$("#sAlt"),spd:$("#sSpd"),col:$("#sCol"),prox:$("#sProx"),ret:$("#sRet"),auth:$("#sAuth")};
+function evalSafety(){
+  const tool=S.tool.value, b=+S.batt.value, tel=S.tel.value/10, alt=+S.alt.value, spd=+S.spd.value, col=S.col.value/100, prox=S.prox.value/10, ret=+S.ret.value, auth=S.auth.checked;
+  $("#vBatt").textContent=b+"%"; $("#vTel").textContent=tel.toFixed(1)+" s"; $("#vAlt").textContent=alt+" m"; $("#vSpd").textContent=spd+" m/s"; $("#vCol").textContent=col.toFixed(2); $("#vProx").textContent=prox.toFixed(1)+" m"; $("#vRet").textContent=ret;
+  const read=tool==="get_telemetry", motion=["goto_position","set_speed"].includes(tool), pay=tool==="payload_release";
+  const g=[]; let worst=0, verdict="ALLOW", reason="All gates nominal";
+  function add(name,lvl,txt,v,r){g.push([name,lvl,txt]); if(lvl==="bad"&&worst<3){worst=3;verdict=v;reason=r} else if(lvl==="warn"&&worst<2){worst=2;verdict=v;reason=r}}
+  if(read){g.push(["Read-only tool","ok","bypasses flight gates"])}
+  // battery
+  if(read) g.push(["Battery","na","n/a"]);
+  else if(b<15) add("Battery","bad",b+"% < 15%","FAILSAFE","Battery critical: emergency land / RTL");
+  else if(b<25) add("Battery","warn",b+"% < 25%","REPLAN","Battery low: mission replanned to return home");
+  else g.push(["Battery","ok",b+"%"]);
+  // telemetry
+  if(tel>10) add("Telemetry freshness","bad",tel.toFixed(1)+" s > 10 s","FAILSAFE","Telemetry lost: emergency failsafe");
+  else if(tel>5) add("Telemetry freshness","warn",tel.toFixed(1)+" s > 5 s","WAIT","Telemetry stale: hold until fresh");
+  else g.push(["Telemetry freshness","ok",tel.toFixed(1)+" s"]);
+  // altitude
+  if(read) g.push(["Altitude ceiling","na","n/a"]);
+  else if(alt>120) add("Altitude ceiling","bad",alt+" m > 120 m","BLOCK","Altitude exceeds 120 m ceiling");
+  else g.push(["Altitude ceiling","ok",alt+" m"]);
+  // speed
+  if(!motion) g.push(["Speed limit","na","n/a"]);
+  else if(spd>15) add("Speed limit","bad",spd+" m/s > 15","BLOCK","Speed exceeds 15 m/s limit");
+  else g.push(["Speed limit","ok",spd+" m/s"]);
+  // avoidance
+  if(!motion&&!pay) g.push(["DroNet avoidance","na","n/a"]);
+  else if(col>=0.7) add("DroNet avoidance","bad","p="+col.toFixed(2)+" ≥ 0.70","WAIT","DroNet steering around obstacle: planner waits");
+  else g.push(["DroNet avoidance","ok","p="+col.toFixed(2)]);
+  // slam
+  if(!motion&&!pay) g.push(["SLAM proximity","na","n/a"]);
+  else if(prox<1.5) add("SLAM proximity","bad",prox.toFixed(1)+" m < 1.5 m","BLOCK","Obstacle inside 1.5 m standoff");
+  else g.push(["SLAM proximity","ok",prox.toFixed(1)+" m"]);
+  // retries
+  if(ret>=3) add("Retry limit","bad",ret+" ≥ 3","ABORT","Too many failures: mission aborted");
+  else g.push(["Retry limit","ok",ret+" / 3"]);
+  // payload
+  if(pay){ if(!auth) add("Human authorization","bad","not given","BLOCK","Payload release requires human authorization"); else g.push(["Human authorization","ok","given (time-limited)"]); }
+  else g.push(["Human authorization","na","n/a"]);
+  const v=$("#verdict"); v.className="verdict "+(worst===3?"bad":worst===2?"warn":"ok");
+  v.innerHTML=`<div class="vd">${verdict}</div><div class="vr">${reason}</div>`;
+  $("#gates").innerHTML=g.map(x=>`<li><span>${x[0]}</span><span class="g-${x[1]}">${x[1]==="ok"?"PASS":x[1]==="warn"?"WARN":x[1]==="bad"?"FAIL":"—"} · ${x[2]}</span></li>`).join("");
+}
+Object.values(S).forEach(el=>el.addEventListener("input",evalSafety)); evalSafety();
+
+/* ---------- state machine ---------- */
+const POS={idle:[70,60],connected:[230,60],armed:[390,60],takeoff:[550,60],hover:[470,190],enroute:[230,190],landing:[230,320],rtl:[470,320],failsafe:[70,250]};
+const TR={idle:["connected","failsafe"],connected:["armed","idle","failsafe"],armed:["takeoff","connected","failsafe"],takeoff:["hover","enroute","failsafe"],enroute:["hover","landing","rtl","failsafe"],hover:["enroute","landing","rtl","failsafe"],landing:["idle","failsafe"],rtl:["landing","failsafe"],failsafe:["idle"]};
+const ANY=null;
+const TOOLS={connect_drone:["write",["idle"]],get_current_state:["read",ANY],get_telemetry:["read",ANY],get_position_str:["read",ANY],get_battery:["read",ANY],get_distance_to_str:["read",ANY],
+  set_mode:["write",["connected","armed","hover","failsafe"]],arm_drone:["critical",["connected"]],disarm_drone:["critical",["idle","connected","landing","failsafe"]],takeoff:["critical",["armed"]],
+  land:["critical",["hover","enroute","rtl","failsafe"]],return_to_launch:["critical",["hover","enroute"]],goto_position:["write",["hover","enroute"]],set_yaw:["write",["hover","enroute"]],set_speed:["write",["hover","enroute"]],
+  wait_altitude:["read",["takeoff","hover"]],wait_arrival:["read",["enroute","rtl"]],wait_time:["read",ANY],vision_obstacle_check:["read",ANY],vision_depth_snapshot:["read",ANY],vision_detect_objects:["read",ANY]};
+const DESC={idle:"Powered, not linked to the flight controller.",connected:"MAVLink heartbeat established; pre-flight checks.",armed:"Motors armed on the ground, ready for takeoff.",takeoff:"Climbing to the commanded altitude.",hover:"Holding position; ISR, inspection or aiming happen here.",enroute:"Flying to a GPS target.",landing:"Descending to land at the current location.",rtl:"Returning to the launch point automatically.",failsafe:"Emergency mode, entered from ANY state via force_failsafe()."};
+const W=96,H=34;
+function edgePath(a,b){const [x1,y1]=POS[a],[x2,y2]=POS[b];const dx=x2-x1,dy=y2-y1,len=Math.hypot(dx,dy);const ux=dx/len,uy=dy/len;
+  const ex=(p,ux,uy)=>{const tx=ux?(W/2)/Math.abs(ux):1e9,ty=uy?(H/2)/Math.abs(uy):1e9;const t=Math.min(tx,ty);return [p[0]+ux*t,p[1]+uy*t]};
+  const s=ex([x1,y1],ux,uy),e=ex([x2,y2],-ux,-uy);const nx=-uy*14,ny=ux*14;const mx=(s[0]+e[0])/2+nx,my=(s[1]+e[1])/2+ny;return `M${s[0]},${s[1]} Q${mx},${my} ${e[0]},${e[1]}`}
+let edgesHTML="";for(const a in TR){for(const b of TR[a]){edgesHTML+=`<path class="edge" data-a="${a}" data-b="${b}" d="${edgePath(a,b)}"/>`}}
+$("#smEdges").innerHTML=edgesHTML;
+$("#smNodes").innerHTML=Object.keys(POS).map(k=>`<g class="st-node ${k==="failsafe"?"fs":""}" data-k="${k}" tabindex="0" role="button" aria-label="${k}"><rect x="${POS[k][0]-W/2}" y="${POS[k][1]-H/2}" width="${W}" height="${H}" rx="9"/><text x="${POS[k][0]}" y="${POS[k][1]+4}" text-anchor="middle">${k.toUpperCase()}</text></g>`).join("");
+function showState(k){
+  $$("#smNodes .st-node").forEach(n=>{n.classList.toggle("sel",n.dataset.k===k);n.classList.toggle("nxt",TR[k].includes(n.dataset.k)&&n.dataset.k!==k)});
+  $$("#smEdges .edge").forEach(e=>e.classList.toggle("hot",e.dataset.a===k));
+  const tools=Object.entries(TOOLS).filter(([n,[p,s]])=>s===ANY||s.includes(k));
+  const flight=tools.filter(([n,[p,s]])=>s!==ANY), any=tools.filter(([n,[p,s]])=>s===ANY);
+  $("#smDetail").innerHTML=`<div class="kicker">State</div><h3 class="mono">${k.toUpperCase()}</h3><p>${DESC[k]}</p>
+   <p style="margin-top:10px"><b style="color:var(--text)">Legal next states:</b> ${TR[k].map(x=>`<span class="tag ok">${x}</span>`).join("")}</p>
+   <p style="margin-top:6px"><b style="color:var(--text)">State-specific tools (${flight.length}):</b></p><div class="toollist">${flight.length?flight.map(([n,[p]])=>`<span class="${p}">${n}</span>`).join(""):"<span>none</span>"}</div>
+   <p style="margin-top:8px"><b style="color:var(--text)">+ ${any.length} tools valid in any state</b> (telemetry, battery, vision, wait)</p>
+   <p class="note"><span style="color:var(--bad)">red</span> = critical · <span style="color:var(--warn)">amber</span> = write</p>`;
+}
+$$("#smNodes .st-node").forEach(n=>{n.addEventListener("click",()=>showState(n.dataset.k));n.addEventListener("keydown",e=>{if(e.key==="Enter"){e.stopPropagation();showState(n.dataset.k)}})});
+showState("hover");
+
+/* ---------- chains ---------- */
+function makeChain(id,links,nextBtn,resetBtn,abortBtn){
+  let pos=-1, aborted=false;
+  const box=$("#"+id), det=$("#"+id+"Detail");
+  function render(sel){
+    box.innerHTML=links.map((l,i)=>`<button class="link ${i<=pos?"done":""} ${i===sel?"sel":""} ${i>pos+1?"locked":""}" data-i="${i}"><span class="who ${l.who}">${l.whoLbl}</span>${i<=pos?"✓ ":""}${l.t}</button>`).join("");
+    $$("#"+id+" .link").forEach(b=>b.onclick=()=>{const i=+b.dataset.i;if(i>pos+1){toast("Complete earlier steps first, they can't be skipped");return}show(i)});
+  }
+  function show(i){const l=links[i];render(i);det.innerHTML=`<div class="kicker">${l.whoLbl} · step ${i+1} of ${links.length}</div><h3>${l.t}</h3><p style="color:var(--text)">${l.d}</p>${l.tool?`<p class="note">Implementation: <span class="mono">${l.tool}</span></p>`:""}`}
+  function next(){
+    if(aborted){toast("Chain aborted. Reset to start again");return}
+    if(pos>=links.length-1){det.innerHTML=`<div class="kicker">Complete</div><h3>Sortie complete. Logged for after-action review.</h3><p>Every step above, with actor and timestamp, is in the mission audit log.</p>`;return}
+    pos++; show(pos);
+  }
+  function reset(){pos=-1;aborted=false;render(-1);det.innerHTML=`<p>Press <b>Advance</b> or click the first step to begin.</p>`}
+  $("#"+nextBtn).onclick=next; $("#"+resetBtn).onclick=reset;
+  if(abortBtn) $("#"+abortBtn).onclick=()=>{aborted=true;render(-1);det.innerHTML=`<div class="kicker" style="color:var(--bad)">Abort</div><h3>Payload safed. Authorization revoked.</h3><p style="color:var(--text)">Any human in the chain can abort at any time. The master-arm drops, the payload returns to SAFE, and the drone holds or returns to launch. The AI can always abort, but it can never authorize.</p>`};
+  reset();
+}
+makeChain("chainDef",[
+  {who:"ai",whoLbl:"AI assists",t:"Detect & track",d:"Onboard YOLO and depth detect and track a point of interest, geo-located through the localizer (camera → FRD → NED → GPS). The AI reports it to the operator by voice.",tool:"vision_detect_objects · localization/localizer.py"},
+  {who:"ai",whoLbl:"AI assists",t:"Classify & report",d:"The AI gives a suggested classification with a confidence score, plus position, distance and bearing. This is advisory only. Low confidence prompts a request for a closer look instead.",tool:"get_distance_to_str · ToolResponse.confidence"},
+  {who:"human",whoLbl:"Operator",t:"Positive identification",d:"The operator checks the live video feed and confirms identification against the Rules of Engagement and the no-strike list. The AI cannot do this step.",tool:"Ground control station (proposed)"},
+  {who:"human",whoLbl:"Commander",t:"Release authorization",d:"A second, separate human authorizes the release. The authorization is bound to one target and position and expires after a short time window. The voice LLM has no tool that can grant it.",tool:"payload_authorize (proposed, critical, non-LLM)"},
+  {who:"hw",whoLbl:"Hardware",t:"Master-arm & safety gates",d:"A physical master-arm on an independent circuit is engaged. The safety policy re-checks battery, telemetry, geofence, avoidance and state (must be HOVER). Any failure blocks the release.",tool:"safety_policy.py + hardware interlock (proposed)"},
+  {who:"human",whoLbl:"Operator",t:"Human-actuated release",d:"The operator actuates the release. The system logs who did it, when, where and with which authorization. The payload returns to SAFE automatically afterwards.",tool:"payload_release (proposed, critical)"},
+  {who:"ai",whoLbl:"AI assists",t:"Assess & report",d:"The drone holds position, records the outcome and reports it. Then it continues the mission or returns to launch as ordered.",tool:"workflows/inspection.py · return_to_launch"}
+],"defNext","defReset","defAbort");
+makeChain("chainFire",[
+  {who:"human",whoLbl:"Officer (voice)",t:"Dispatch by voice",d:"\"Fire on the 9th floor of the building ahead, go now.\" Gemini turns this into connect → arm → takeoff → goto_position. The planner runs the standard takeoff workflow.",tool:"workflows/takeoff.py · workflows/navigation.py"},
+  {who:"ai",whoLbl:"AI",t:"Thermal hotspot search",d:"Climbs to the floor and scans the façade. Thermal fusion ranks windows by heat signature. The hottest opening becomes the aim point.",tool:"thermal fusion (roadmap) + vision_detect_objects"},
+  {who:"ai",whoLbl:"AI",t:"Approach & hold standoff",d:"Flies to the release point while DroNet and SLAM keep at least 1.5 m from the wall. The planner waits if avoidance is active, and altitude and speed hard limits are enforced.",tool:"safety_policy.py proximity gate · planner avoidance gate"},
+  {who:"ai",whoLbl:"AI",t:"Aim & stabilize",d:"Hovers with VIO plus GPS position hold and computes the release point from height and drift. The live view is shown to the officer.",tool:"PoseCache (VIO primary) · HOVER state"},
+  {who:"human",whoLbl:"Officer",t:"Confirm drop",d:"A single operator confirmation (voice or button) releases one extinguisher unit. Each drop needs its own confirmation.",tool:"payload_release (proposed, critical)"},
+  {who:"ai",whoLbl:"AI",t:"Reassess & repeat or RTL",d:"Re-scans with thermal. If heat is still present it suggests another drop. When payload or battery is spent (25% low / 15% critical), it returns to launch automatically.",tool:"battery_monitor · return_to_launch"}
+],"fireNext","fireReset",null);
+
+/* ---------- specs ---------- */
+const SPEC=[
+  ["Airframe class","Ruggedized heavy-lift hexacopter, folding arms, IP54","Heat-shielded heavy-lift hexacopter, reflective skin, IP55"],
+  ["Max take-off weight","≈ 25 kg","≈ 25 kg"],
+  ["Payload capacity","5–8 kg (modular bay)","6–10 kg (extinguisher rack)"],
+  ["Endurance","35 min ISR · 15–20 min loaded","30 min scout · 12–15 min loaded"],
+  ["Control / video range","5–10 km (encrypted link)","2–5 km (line of sight, urban)"],
+  ["Operating altitude","≤ 120 m AGL (software-enforced)","≤ 120 m AGL (software-enforced)"],
+  ["Max speed","15 m/s (software-enforced)","15 m/s (software-enforced)"],
+  ["Wind tolerance","≈ 10–12 m/s","≈ 10 m/s (plus fire updraft margin)"],
+  ["Primary sensor","EO/IR gimbal, 30× zoom + thermal","Radiometric thermal + RGB"],
+  ["Navigation","GPS + VIO/SLAM (GPS-denied capable)","GPS + VIO/SLAM (indoor capable)"],
+  ["Edge compute","RPi 5 class + OAK-D Lite (Myriad X)","RPi 5 class + OAK-D Lite (Myriad X)"],
+  ["Payload","Supply drop · marker/smoke · approved mission payload [RESTRICTED]","2–6 × AFO balls (~1.3 kg) or 6 kg dry-chem canister"],
+  ["Release control","Two-person auth + hardware master-arm","Operator confirmation per drop"],
+  ["Failsafes","RTL on low battery / link loss, payload auto-safe","RTL on low battery / heat / link loss"],
+  ["Voice interface","Bangla (Gemini Live) · optional local LLM","Bangla (Gemini Live)"]
+];
+function renderSpec(v){
+  $$("#specTabs button").forEach(b=>b.classList.toggle("on",b.dataset.v===v));
+  const head=v==="both"?`<tr><th>Parameter</th><th style="color:var(--def)">Defense</th><th style="color:var(--fire)">Firefighting</th></tr>`:`<tr><th>Parameter</th><th style="color:var(--${v})">${v==="def"?"Defense":"Firefighting"}</th></tr>`;
+  $("#specTable").innerHTML=head+SPEC.map(r=>{const f=s=>s.replace("[RESTRICTED]",'<span class="redact">[RESTRICTED]</span>');return v==="both"?`<tr><td>${r[0]}</td><td class="v">${f(r[1])}</td><td class="v">${f(r[2])}</td></tr>`:`<tr><td>${r[0]}</td><td class="v">${f(v==="def"?r[1]:r[2])}</td></tr>`}).join("");
+}
+$$("#specTabs button").forEach(b=>b.onclick=()=>renderSpec(b.dataset.v)); renderSpec("both");
+})();
+</script>
+</body>
+</html>
